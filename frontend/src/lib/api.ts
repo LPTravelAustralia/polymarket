@@ -53,10 +53,26 @@ export interface Trade {
   mode: string
 }
 
+export interface ClosedTrade {
+  market_id: string
+  question: string
+  side: string
+  size: number
+  entry_price: number
+  exit_price: number
+  pnl: number
+  reason: string  // 'TP' | 'SL'
+  opened_at: string
+  closed_at: string
+}
+
 export interface Portfolio {
   positions: Position[]
   trades: Trade[]
+  closed_trades: ClosedTrade[]
   total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
   exposure: number
 }
 
@@ -69,6 +85,8 @@ export interface BotConfig {
   poll_interval: number
   agent: string
   markets?: string[] | null
+  take_profit?: number
+  stop_loss?: number
 }
 
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {

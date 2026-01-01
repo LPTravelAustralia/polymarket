@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import sys
+import sqlite3
 from pathlib import Path
 from collections import deque
 
@@ -23,6 +24,192 @@ from src.core.gamma_client import GammaMarketClient
 from src.core.config import load_config
 
 # ============================================================================
+# SQLite Persistence
+# ============================================================================
+
+DB_PATH = Path(__file__).parent / "trading_bot.db"
+
+
+def init_db():
+    """Initialize SQLite database with tables"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Positions table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS positions (
+            market_id TEXT PRIMARY KEY,
+            question TEXT,
+            side TEXT,
+            size REAL,
+            entry_price REAL,
+            mark_price REAL,
+            unrealized_pnl REAL,
+            opened_at TEXT,
+            last_update TEXT
+        )
+    """)
+    
+    # Trades table (entry trades)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT,
+            question TEXT,
+            side TEXT,
+            size REAL,
+            entry_price REAL,
+            timestamp TEXT,
+            mode TEXT
+        )
+    """)
+    
+    # Closed trades table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS closed_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT,
+            question TEXT,
+            side TEXT,
+            size REAL,
+            entry_price REAL,
+            exit_price REAL,
+            pnl REAL,
+            reason TEXT,
+            opened_at TEXT,
+            closed_at TEXT
+        )
+    """)
+    
+    # Stats table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS stats (
+            key TEXT PRIMARY KEY,
+            value REAL
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+
+def save_position(pos: Dict[str, Any]):
+    """Save/update a position to DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT OR REPLACE INTO positions 
+        (market_id, question, side, size, entry_price, mark_price, unrealized_pnl, opened_at, last_update)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        pos.get("market_id"),
+        pos.get("question"),
+        pos.get("side"),
+        pos.get("size"),
+        pos.get("entry_price"),
+        pos.get("mark_price"),
+        pos.get("unrealized_pnl", 0),
+        pos.get("opened_at"),
+        pos.get("last_update")
+    ))
+    conn.commit()
+    conn.close()
+
+
+def delete_position(market_id: str):
+    """Remove a position from DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM positions WHERE market_id = ?", (market_id,))
+    conn.commit()
+    conn.close()
+
+
+def save_trade(trade: Dict[str, Any]):
+    """Save an entry trade to DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO trades (market_id, question, side, size, entry_price, timestamp, mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        trade.get("market_id"),
+        trade.get("question"),
+        trade.get("side"),
+        trade.get("size"),
+        trade.get("entry_price"),
+        trade.get("timestamp"),
+        trade.get("mode", "paper")
+    ))
+    conn.commit()
+    conn.close()
+
+
+def save_closed_trade(trade: Dict[str, Any]):
+    """Save a closed trade to DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO closed_trades 
+        (market_id, question, side, size, entry_price, exit_price, pnl, reason, opened_at, closed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        trade.get("market_id"),
+        trade.get("question"),
+        trade.get("side"),
+        trade.get("size"),
+        trade.get("entry_price"),
+        trade.get("exit_price"),
+        trade.get("pnl"),
+        trade.get("reason"),
+        trade.get("opened_at"),
+        trade.get("closed_at")
+    ))
+    conn.commit()
+    conn.close()
+
+
+def save_stat(key: str, value: float):
+    """Save a stat to DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO stats (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+
+
+def load_state() -> Dict[str, Any]:
+    """Load all state from DB"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # Load positions
+    positions = {}
+    for row in c.execute("SELECT * FROM positions"):
+        pos = dict(row)
+        positions[pos["market_id"]] = pos
+    
+    # Load trades
+    trades = [dict(row) for row in c.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 100")]
+    
+    # Load closed trades
+    closed_trades = [dict(row) for row in c.execute("SELECT * FROM closed_trades ORDER BY id DESC LIMIT 100")]
+    
+    # Load stats
+    stats = {}
+    for row in c.execute("SELECT * FROM stats"):
+        stats[row["key"]] = row["value"]
+    
+    conn.close()
+    return {
+        "positions": positions,
+        "trades": trades,
+        "closed_trades": closed_trades,
+        "realized_pnl": stats.get("realized_pnl", 0.0)
+    }
+
+# ============================================================================
 # App Configuration
 # ============================================================================
 
@@ -30,6 +217,11 @@ from src.core.config import load_config
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     print("🚀 Starting Polymarket Trading Bot API...")
+    
+    # Initialize SQLite
+    init_db()
+    saved = load_state()
+    
     # Initialize clients
     app.state.gamma_client = GammaMarketClient()
     app.state.bot_running = False
@@ -39,16 +231,22 @@ async def lifespan(app: FastAPI):
         "trades_today": 0,
         "total_pnl": 0.0,
         "win_rate": 0.0,
-        "active_positions": 0
+        "active_positions": len(saved["positions"])
     }
     app.state.activity_log = []
-    app.state.positions: Dict[str, Dict[str, Any]] = {}
-    app.state.trades: List[Dict[str, Any]] = []
+    app.state.positions: Dict[str, Dict[str, Any]] = saved["positions"]
+    app.state.trades: List[Dict[str, Any]] = saved["trades"]
+    app.state.closed_trades: List[Dict[str, Any]] = saved["closed_trades"]
+    app.state.realized_pnl: float = saved["realized_pnl"]
     app.state.price_history: Dict[str, deque] = {}
     app.state.equity_history: List[Dict[str, Any]] = []  # For charting
     app.state.equity_start = 0.0
     app.state.equity_peak = 0.0
     app.state.connected_clients: List[WebSocket] = []
+    
+    if saved["positions"]:
+        print(f"📂 Loaded {len(saved['positions'])} positions, ${saved['realized_pnl']:.2f} realized PnL")
+    
     yield
     print("👋 Shutting down...")
 
@@ -127,6 +325,8 @@ class BotConfig(BaseModel):
     poll_interval: int = 20
     agent: str = "momentum"  # momentum | ai
     markets: Optional[List[str]] = None  # Optional allowlist of markets to trade
+    take_profit: float = 0.15  # Close position at +15% gain
+    stop_loss: float = 0.10  # Close position at -10% loss
 
 
 class PositionSnapshot(BaseModel):
@@ -143,7 +343,10 @@ class PositionSnapshot(BaseModel):
 class PortfolioState(BaseModel):
     positions: List[PositionSnapshot]
     trades: List[Dict[str, Any]]
+    closed_trades: List[Dict[str, Any]] = []
     total_pnl: float
+    realized_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
     exposure: float
 
 
@@ -242,9 +445,11 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
         return "no"  # Above fair value, bet NO
 
 
-def _mark_positions(markets: Dict[str, MarketResponse]) -> float:
-    """Mark positions to market and return total unrealized PnL"""
+def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> float:
+    """Mark positions to market, check TP/SL, return total unrealized PnL"""
     total_pnl = 0.0
+    positions_to_close = []
+    
     for mid, pos in list(app.state.positions.items()):
         market = markets.get(mid)
         if not market:
@@ -258,6 +463,42 @@ def _mark_positions(markets: Dict[str, MarketResponse]) -> float:
         pos["mark_price"] = mark_price
         pos["last_update"] = datetime.now().isoformat()
         total_pnl += pnl
+        
+        # Check take-profit / stop-loss
+        pnl_pct = pnl / (entry * size) if entry * size > 0 else 0
+        if pnl_pct >= config.take_profit:
+            positions_to_close.append((mid, pos, pnl, "TP"))
+        elif pnl_pct <= -config.stop_loss:
+            positions_to_close.append((mid, pos, pnl, "SL"))
+    
+    # Close triggered positions
+    for mid, pos, realized_pnl, reason in positions_to_close:
+        emoji = "🟢" if reason == "TP" else "🔴"
+        add_activity(f"{emoji} {reason} closed {pos['side'].upper()} on {pos['question'][:35]}... PnL: ${realized_pnl:+.2f}")
+        
+        # Record closed trade
+        closed_trade = {
+            "market_id": mid,
+            "question": pos.get("question", ""),
+            "side": pos.get("side"),
+            "size": pos.get("size"),
+            "entry_price": pos.get("entry_price"),
+            "exit_price": pos.get("mark_price"),
+            "pnl": realized_pnl,
+            "reason": reason,
+            "opened_at": pos.get("opened_at"),
+            "closed_at": datetime.now().isoformat(),
+        }
+        app.state.closed_trades.insert(0, closed_trade)
+        save_closed_trade(closed_trade)  # Persist to DB
+        
+        app.state.realized_pnl += realized_pnl
+        save_stat("realized_pnl", app.state.realized_pnl)  # Persist to DB
+        
+        # Remove from open positions
+        del app.state.positions[mid]
+        delete_position(mid)  # Remove from DB
+    
     return total_pnl
 
 
@@ -289,8 +530,10 @@ async def _trading_loop(config: BotConfig):
             
             if not app.state.positions:  # Log once at start
                 add_activity(f"📊 Scanned {len(parsed_markets)} markets, {tradeable_count} in tradeable range")
-            # Mark existing positions
-            total_pnl = _mark_positions(parsed_markets)
+            # Mark existing positions and check TP/SL
+            total_pnl = _mark_positions(parsed_markets, config)
+            # Include realized PnL from closed trades
+            total_pnl += app.state.realized_pnl
             app.state.bot_stats["total_pnl"] = round(total_pnl, 2)
             app.state.bot_stats["active_positions"] = len(app.state.positions)
             app.state.bot_stats["trades_today"] = len(app.state.trades)
@@ -330,9 +573,12 @@ async def _trading_loop(config: BotConfig):
                     "mark_price": entry_price,
                     "unrealized_pnl": 0.0,
                     "opened_at": datetime.now().isoformat(),
+                    "last_update": datetime.now().isoformat(),
                 }
                 app.state.positions[market.id] = position
-                app.state.trades.insert(0, {
+                save_position(position)  # Persist to DB
+                
+                trade = {
                     "market_id": market.id,
                     "question": market.question,
                     "side": signal,
@@ -340,7 +586,10 @@ async def _trading_loop(config: BotConfig):
                     "entry_price": entry_price,
                     "timestamp": datetime.now().isoformat(),
                     "mode": "paper",
-                })
+                }
+                app.state.trades.insert(0, trade)
+                save_trade(trade)  # Persist to DB
+                
                 trades_opened += 1
                 add_activity(
                     f"🟢 Entered {signal.upper()} ${config.trade_size} on {market.question[:42]}... at {entry_price:.2f}"
@@ -457,7 +706,10 @@ async def get_activity(limit: int = 20):
 async def get_portfolio():
     """Return current paper-trading portfolio snapshot"""
     positions = []
+    unrealized = 0.0
     for pos in app.state.positions.values():
+        pnl = float(pos.get("unrealized_pnl", 0))
+        unrealized += pnl
         positions.append(PositionSnapshot(
             market_id=pos.get("market_id"),
             question=pos.get("question", ""),
@@ -465,14 +717,19 @@ async def get_portfolio():
             size=float(pos.get("size", 0)),
             entry_price=float(pos.get("entry_price", 0)),
             mark_price=float(pos.get("mark_price", pos.get("entry_price", 0))),
-            unrealized_pnl=float(pos.get("unrealized_pnl", 0)),
+            unrealized_pnl=pnl,
             last_update=pos.get("last_update", pos.get("opened_at", datetime.now().isoformat()))
         ))
     exposure = _current_exposure()
+    realized = getattr(app.state, "realized_pnl", 0.0)
+    closed = getattr(app.state, "closed_trades", [])
     return PortfolioState(
         positions=positions,
         trades=app.state.trades[:50],
-        total_pnl=float(app.state.bot_stats.get("total_pnl", 0.0)),
+        closed_trades=closed[:50],
+        total_pnl=realized + unrealized,
+        realized_pnl=realized,
+        unrealized_pnl=unrealized,
         exposure=exposure
     )
 
@@ -488,6 +745,8 @@ async def start_bot(config: BotConfig):
     app.state.bot_stats["trades_today"] = 0
     app.state.trades = []
     app.state.positions = {}
+    app.state.closed_trades = []
+    app.state.realized_pnl = 0.0
     app.state.price_history = {}
     app.state.equity_history = []  # Reset chart data
     

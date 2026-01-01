@@ -108,7 +108,7 @@ export function Sidebar({
       {portfolio?.positions && portfolio.positions.length > 0 && (
         <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <span className="text-xl">💼</span> Positions
+            <span className="text-xl">💼</span> Positions ({portfolio.positions.length})
           </h2>
 
           <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -128,6 +128,45 @@ export function Sidebar({
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                   <span>Entry: {(pos.entry_price * 100).toFixed(1)}¢</span>
                   <span>Mark: {(pos.mark_price * 100).toFixed(1)}¢</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Closed Trades */}
+      {portfolio?.closed_trades && portfolio.closed_trades.length > 0 && (
+        <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <span className="text-xl">📜</span> Closed Trades ({portfolio.closed_trades.length})
+          </h2>
+          
+          <div className="text-sm mb-3 flex justify-between">
+            <span className="text-gray-400">Realized P&L:</span>
+            <span className={portfolio.realized_pnl >= 0 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold'}>
+              {portfolio.realized_pnl >= 0 ? '+' : ''}{formatCurrency(portfolio.realized_pnl)}
+            </span>
+          </div>
+
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {portfolio.closed_trades.slice(0, 10).map((trade, idx) => (
+              <div key={idx} className="bg-black/30 rounded-xl p-3 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="truncate flex-1 mr-2" title={trade.question}>
+                    {trade.question.slice(0, 30)}...
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                    trade.reason === 'TP' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    {trade.reason}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>{trade.side.toUpperCase()} ${trade.size}</span>
+                  <span className={trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}
+                  </span>
                 </div>
               </div>
             ))}

@@ -276,13 +276,19 @@ async def _trading_loop(config: BotConfig):
             parsed_markets: Dict[str, MarketResponse] = {}
 
             # Prepare market map and update price history
+            tradeable_count = 0
             for raw in markets_raw:
                 market = parse_market(raw)
                 if config.markets and market.id not in config.markets:
                     continue
                 parsed_markets[market.id] = market
                 _update_price_history(market.id, market.yes_price)
-
+                # Count how many are in tradeable range
+                if 0.05 <= market.yes_price <= 0.95 and market.liquidity >= 100:
+                    tradeable_count += 1
+            
+            if not app.state.positions:  # Log once at start
+                add_activity(f"📊 Scanned {len(parsed_markets)} markets, {tradeable_count} in tradeable range")
             # Mark existing positions
             total_pnl = _mark_positions(parsed_markets)
             app.state.bot_stats["total_pnl"] = round(total_pnl, 2)
@@ -298,8 +304,11 @@ async def _trading_loop(config: BotConfig):
                 app.state.bot_running = False
                 break
 
-            # Consider new trades
-            for market in list(parsed_markets.values())[: config.max_markets]:
+            # Consider new trades - iterate all markets to find tradeable ones
+            trades_opened = 0
+            for market in parsed_markets.values():
+                if trades_opened >= config.max_markets:
+                    break
                 if market.id in app.state.positions:
                     continue
                 if _current_exposure() + config.trade_size > config.global_cap:
@@ -332,6 +341,7 @@ async def _trading_loop(config: BotConfig):
                     "timestamp": datetime.now().isoformat(),
                     "mode": "paper",
                 })
+                trades_opened += 1
                 add_activity(
                     f"🟢 Entered {signal.upper()} ${config.trade_size} on {market.question[:42]}... at {entry_price:.2f}"
                 )

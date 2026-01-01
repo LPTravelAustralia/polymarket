@@ -2,7 +2,7 @@
 
 import { BotStatus, Portfolio, formatCurrency } from '@/lib/api'
 import { PnLChart } from './PnLChart'
-import { Play, Square, Activity, TrendingUp, Target, Clock, Wallet } from 'lucide-react'
+import { Play, Square, Activity, TrendingUp, Target, Clock, Wallet, Settings } from 'lucide-react'
 
 interface EquityPoint {
   timestamp: string
@@ -20,6 +20,7 @@ interface SidebarProps {
   onStop: () => void
   isStarting: boolean
   isStopping: boolean
+  onOpenSettings?: () => void
 }
 
 export function Sidebar({ 
@@ -30,15 +31,27 @@ export function Sidebar({
   onStart, 
   onStop, 
   isStarting, 
-  isStopping 
+  isStopping,
+  onOpenSettings
 }: SidebarProps) {
   return (
     <div className="space-y-6">
       {/* Bot Controls */}
       <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <span className="text-xl">🎮</span> Bot Controls
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <span className="text-xl">🎮</span> Bot Controls
+          </h2>
+          {onOpenSettings && (
+            <button
+              onClick={onOpenSettings}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5 text-gray-400" />
+            </button>
+          )}
+        </div>
 
         <div className="flex gap-3">
           <button
@@ -68,16 +81,16 @@ export function Sidebar({
 
         <div className="grid grid-cols-2 gap-3">
           <StatItem
-            icon={Activity}
-            label="Trades"
-            value={status?.trades_today?.toString() ?? '0'}
-            color="text-blue-400"
-          />
-          <StatItem
             icon={TrendingUp}
-            label="P&L"
+            label="Total P&L"
             value={formatCurrency(portfolio?.total_pnl ?? status?.total_pnl ?? 0)}
             color={(portfolio?.total_pnl ?? status?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}
+          />
+          <StatItem
+            icon={Target}
+            label="Win Rate"
+            value={portfolio?.stats ? `${portfolio.stats.win_rate}%` : '0%'}
+            color="text-blue-400"
           />
           <StatItem
             icon={Wallet}
@@ -92,6 +105,19 @@ export function Sidebar({
             color="text-yellow-400"
           />
         </div>
+
+        {/* Detailed stats when available */}
+        {portfolio?.stats && portfolio.stats.total_trades > 0 && (
+          <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 gap-2 text-sm">
+            <div className="text-gray-400">Trades: <span className="text-white">{portfolio.stats.total_trades}</span></div>
+            <div className="text-gray-400">Wins: <span className="text-green-400">{portfolio.stats.winning_trades}</span> / Losses: <span className="text-red-400">{portfolio.stats.losing_trades}</span></div>
+            <div className="text-gray-400">Avg Win: <span className="text-green-400">${portfolio.stats.avg_win}</span></div>
+            <div className="text-gray-400">Avg Loss: <span className="text-red-400">${portfolio.stats.avg_loss}</span></div>
+            <div className="text-gray-400">Best: <span className="text-green-400">${portfolio.stats.best_trade}</span></div>
+            <div className="text-gray-400">Worst: <span className="text-red-400">${portfolio.stats.worst_trade}</span></div>
+            <div className="col-span-2 text-gray-400">Profit Factor: <span className="text-white font-semibold">{portfolio.stats.profit_factor}</span></div>
+          </div>
+        )}
       </div>
 
       {/* P&L Chart */}

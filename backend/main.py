@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import sqlite3
+import httpx
 from pathlib import Path
 from collections import deque
 
@@ -22,6 +23,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.gamma_client import GammaMarketClient
 from src.core.config import load_config
+
+# AI API keys from environment
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # ============================================================================
 # SQLite Persistence
@@ -340,6 +345,18 @@ class PositionSnapshot(BaseModel):
     last_update: str
 
 
+class TradingStats(BaseModel):
+    total_trades: int = 0
+    winning_trades: int = 0
+    losing_trades: int = 0
+    win_rate: float = 0.0
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    best_trade: float = 0.0
+    worst_trade: float = 0.0
+    profit_factor: float = 0.0
+
+
 class PortfolioState(BaseModel):
     positions: List[PositionSnapshot]
     trades: List[Dict[str, Any]]
@@ -348,6 +365,7 @@ class PortfolioState(BaseModel):
     realized_pnl: float = 0.0
     unrealized_pnl: float = 0.0
     exposure: float
+    stats: Optional[TradingStats] = None
 
 
 # ============================================================================
@@ -360,6 +378,44 @@ def add_activity(message: str):
     entry = f"[{timestamp}] {message}"
     app.state.activity_log.insert(0, entry)
     app.state.activity_log = app.state.activity_log[:100]  # Keep last 100
+
+
+def calculate_stats(closed_trades: List[Dict[str, Any]]) -> TradingStats:
+    """Calculate trading statistics from closed trades"""
+    if not closed_trades:
+        return TradingStats()
+    
+    wins = [t for t in closed_trades if t.get("pnl", 0) > 0]
+    losses = [t for t in closed_trades if t.get("pnl", 0) < 0]
+    
+    total_trades = len(closed_trades)
+    winning_trades = len(wins)
+    losing_trades = len(losses)
+    
+    win_rate = winning_trades / total_trades if total_trades > 0 else 0
+    
+    avg_win = sum(t.get("pnl", 0) for t in wins) / len(wins) if wins else 0
+    avg_loss = sum(t.get("pnl", 0) for t in losses) / len(losses) if losses else 0
+    
+    all_pnls = [t.get("pnl", 0) for t in closed_trades]
+    best_trade = max(all_pnls) if all_pnls else 0
+    worst_trade = min(all_pnls) if all_pnls else 0
+    
+    gross_profit = sum(t.get("pnl", 0) for t in wins)
+    gross_loss = abs(sum(t.get("pnl", 0) for t in losses))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf') if gross_profit > 0 else 0
+    
+    return TradingStats(
+        total_trades=total_trades,
+        winning_trades=winning_trades,
+        losing_trades=losing_trades,
+        win_rate=round(win_rate * 100, 1),
+        avg_win=round(avg_win, 2),
+        avg_loss=round(avg_loss, 2),
+        best_trade=round(best_trade, 2),
+        worst_trade=round(worst_trade, 2),
+        profit_factor=round(profit_factor, 2) if profit_factor != float('inf') else 999.99
+    )
 
 
 def parse_market(m: dict) -> MarketResponse:
@@ -443,6 +499,98 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
         return "yes"  # Below fair value, bet YES
     else:
         return "no"  # Above fair value, bet NO
+
+
+async def _ai_signal(market: MarketResponse) -> Optional[str]:
+    """Use AI (Claude/GPT) to analyze market and generate trading signal"""
+    # Trade markets with prices between 10% and 90%
+    if market.yes_price < 0.10 or market.yes_price > 0.90:
+        return None
+    
+    if market.liquidity < 500:
+        return None
+    
+    # Build the prompt
+    prompt = f"""You are an expert prediction market trader. Analyze this market and decide whether to bet YES or NO.
+
+MARKET: {market.question}
+CURRENT YES PRICE: {market.yes_price:.2%} (${market.yes_price:.2f})
+CURRENT NO PRICE: {market.no_price:.2%} (${market.no_price:.2f})
+LIQUIDITY: ${market.liquidity:,.0f}
+
+Consider:
+1. Is the current price fair based on available information?
+2. What is your estimated probability this resolves YES?
+3. Is there edge (difference between your estimate and market price)?
+
+If you believe YES is underpriced (your probability > market price), respond with: BUY_YES
+If you believe NO is underpriced (your probability < market price), respond with: BUY_NO
+If no clear edge, respond with: HOLD
+
+Respond with ONLY one of: BUY_YES, BUY_NO, or HOLD
+No explanation needed, just the action."""
+
+    try:
+        # Try Anthropic first
+        if ANTHROPIC_API_KEY:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": "claude-3-haiku-20240307",
+                        "max_tokens": 50,
+                        "messages": [{"role": "user", "content": prompt}]
+                    },
+                    timeout=30
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get("content", [{}])[0].get("text", "").strip().upper()
+                    add_activity(f"🤖 AI analyzed: {market.question[:40]}... → {text}")
+                    if "BUY_YES" in text:
+                        return "yes"
+                    elif "BUY_NO" in text:
+                        return "no"
+                    return None
+        
+        # Fallback to OpenAI
+        if OPENAI_API_KEY:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "gpt-3.5-turbo",
+                        "max_tokens": 50,
+                        "messages": [{"role": "user", "content": prompt}]
+                    },
+                    timeout=30
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
+                    add_activity(f"🤖 AI analyzed: {market.question[:40]}... → {text}")
+                    if "BUY_YES" in text:
+                        return "yes"
+                    elif "BUY_NO" in text:
+                        return "no"
+                    return None
+        
+        # No AI available, fall back to momentum
+        add_activity("⚠️ No AI API key configured, using momentum signal")
+        return _momentum_signal(market)
+        
+    except Exception as e:
+        add_activity(f"⚠️ AI error: {str(e)[:50]}")
+        return _momentum_signal(market)
 
 
 def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> float:
@@ -559,7 +707,12 @@ async def _trading_loop(config: BotConfig):
                 if _per_market_exposure(market.id) + config.trade_size > config.per_market_cap:
                     continue
 
-                signal = _momentum_signal(market)
+                # Get signal based on selected agent
+                if config.agent == "ai":
+                    signal = await _ai_signal(market)
+                else:
+                    signal = _momentum_signal(market)
+                    
                 if not signal:
                     continue
 
@@ -723,6 +876,7 @@ async def get_portfolio():
     exposure = _current_exposure()
     realized = getattr(app.state, "realized_pnl", 0.0)
     closed = getattr(app.state, "closed_trades", [])
+    stats = calculate_stats(closed)
     return PortfolioState(
         positions=positions,
         trades=app.state.trades[:50],
@@ -730,7 +884,8 @@ async def get_portfolio():
         total_pnl=realized + unrealized,
         realized_pnl=realized,
         unrealized_pnl=unrealized,
-        exposure=exposure
+        exposure=exposure,
+        stats=stats
     )
 
 

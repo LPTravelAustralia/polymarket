@@ -7,13 +7,28 @@ import { StatsRow } from '@/components/StatsRow'
 import { MarketList } from '@/components/MarketList'
 import { Sidebar } from '@/components/Sidebar'
 import { MarketModal } from '@/components/MarketModal'
+import { SettingsPanel } from '@/components/SettingsPanel'
 import { api, Market, BotStatus, Portfolio, BotConfig } from '@/lib/api'
+
+const DEFAULT_SETTINGS: BotConfig = {
+  trade_size: 25,
+  max_markets: 5,
+  per_market_cap: 100,
+  global_cap: 500,
+  drawdown_limit: 200,
+  poll_interval: 20,
+  take_profit: 0.05,
+  stop_loss: 0.03,
+  agent: 'momentum',
+}
 
 export default function Home() {
   const queryClient = useQueryClient()
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [category, setCategory] = useState('all')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [botSettings, setBotSettings] = useState<BotConfig>(DEFAULT_SETTINGS)
 
   // Fetch markets
   const { data: markets, isLoading: marketsLoading } = useQuery({
@@ -107,10 +122,11 @@ export default function Home() {
               portfolio={portfolio}
               equityHistory={equityData?.history ?? []}
               activities={activityData?.activities ?? []}
-              onStart={() => startBot.mutate(undefined)}
+              onStart={() => startBot.mutate(botSettings)}
               onStop={() => stopBot.mutate()}
               isStarting={startBot.isPending}
               isStopping={stopBot.isPending}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
           </div>
         </div>
@@ -127,6 +143,14 @@ export default function Home() {
           }}
         />
       )}
+
+      <SettingsPanel
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={botSettings}
+        onSave={setBotSettings}
+        disabled={status?.running}
+      />
     </div>
   )
 }

@@ -66,6 +66,18 @@ export interface ClosedTrade {
   closed_at: string
 }
 
+export interface TradingStats {
+  total_trades: number
+  winning_trades: number
+  losing_trades: number
+  win_rate: number
+  avg_win: number
+  avg_loss: number
+  best_trade: number
+  worst_trade: number
+  profit_factor: number
+}
+
 export interface Portfolio {
   positions: Position[]
   trades: Trade[]
@@ -74,6 +86,7 @@ export interface Portfolio {
   realized_pnl: number
   unrealized_pnl: number
   exposure: number
+  stats?: TradingStats
 }
 
 export interface BotConfig {

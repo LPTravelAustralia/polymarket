@@ -99,7 +99,7 @@ export default function Home() {
               status={status}
               portfolio={portfolio}
               activities={activityData?.activities ?? []}
-              onStart={() => startBot.mutate()}
+              onStart={() => startBot.mutate(undefined)}
               onStop={() => stopBot.mutate()}
               isStarting={startBot.isPending}
               isStopping={stopBot.isPending}

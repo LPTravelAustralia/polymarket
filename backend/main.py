@@ -3,7 +3,7 @@
 FastAPI Backend for Polymarket Trading Bot
 Production-ready API with WebSocket support
 """
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from collections import deque
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,6 +33,8 @@ async def lifespan(app: FastAPI):
     # Initialize clients
     app.state.gamma_client = GammaMarketClient()
     app.state.bot_running = False
+    app.state.bot_task = None
+    app.state.bot_config: Optional[Any] = None
     app.state.bot_stats = {
         "trades_today": 0,
         "total_pnl": 0.0,
@@ -39,6 +42,11 @@ async def lifespan(app: FastAPI):
         "active_positions": 0
     }
     app.state.activity_log = []
+    app.state.positions: Dict[str, Dict[str, Any]] = {}
+    app.state.trades: List[Dict[str, Any]] = []
+    app.state.price_history: Dict[str, deque] = {}
+    app.state.equity_start = 0.0
+    app.state.equity_peak = 0.0
     app.state.connected_clients: List[WebSocket] = []
     yield
     print("👋 Shutting down...")
@@ -108,6 +116,36 @@ class AnalysisResponse(BaseModel):
     edge: float
 
 
+class BotConfig(BaseModel):
+    """Runtime configuration for the paper-trading loop"""
+    trade_size: float = 25.0
+    max_markets: int = 5
+    per_market_cap: float = 100.0
+    global_cap: float = 500.0
+    drawdown_limit: float = 200.0
+    poll_interval: int = 20
+    agent: str = "momentum"  # momentum | ai
+    markets: Optional[List[str]] = None  # Optional allowlist of markets to trade
+
+
+class PositionSnapshot(BaseModel):
+    market_id: str
+    question: str
+    side: str
+    size: float
+    entry_price: float
+    mark_price: float
+    unrealized_pnl: float
+    last_update: str
+
+
+class PortfolioState(BaseModel):
+    positions: List[PositionSnapshot]
+    trades: List[Dict[str, Any]]
+    total_pnl: float
+    exposure: float
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -151,6 +189,154 @@ async def broadcast_update(data: dict):
             await client.send_json(data)
         except:
             pass
+
+
+def _current_exposure() -> float:
+    """Return total notional exposure of open positions"""
+    exposure = 0.0
+    for pos in app.state.positions.values():
+        exposure += float(pos.get("size", 0)) * float(pos.get("entry_price", 0))
+    return exposure
+
+
+def _per_market_exposure(market_id: str) -> float:
+    pos = app.state.positions.get(market_id)
+    if not pos:
+        return 0.0
+    return float(pos.get("size", 0)) * float(pos.get("entry_price", 0))
+
+
+def _update_price_history(market_id: str, price: float):
+    history = app.state.price_history.get(market_id)
+    if not history:
+        history = deque(maxlen=5)
+        app.state.price_history[market_id] = history
+    history.append(price)
+
+
+def _momentum_signal(market: MarketResponse) -> Optional[str]:
+    """Simple momentum/mean-reversion hybrid to keep demo trading sensible"""
+    history = app.state.price_history.get(market.id, deque())
+    if len(history) < 2:
+        return None
+    delta = history[-1] - history[-2]
+    if delta > 0.02 and market.yes_price < 0.7:
+        return "yes"
+    if delta < -0.02 and market.yes_price > 0.3:
+        return "no"
+    # Mild mispricing check
+    if market.yes_price < 0.4:
+        return "yes"
+    if market.yes_price > 0.6:
+        return "no"
+    return None
+
+
+def _mark_positions(markets: Dict[str, MarketResponse]) -> float:
+    """Mark positions to market and return total unrealized PnL"""
+    total_pnl = 0.0
+    for mid, pos in list(app.state.positions.items()):
+        market = markets.get(mid)
+        if not market:
+            continue
+        side = pos.get("side")
+        entry = float(pos.get("entry_price", 0))
+        size = float(pos.get("size", 0))
+        mark_price = market.yes_price if side == "yes" else market.no_price
+        pnl = (mark_price - entry) * size if side == "yes" else (entry - mark_price) * size
+        pos["unrealized_pnl"] = pnl
+        pos["mark_price"] = mark_price
+        pos["last_update"] = datetime.now().isoformat()
+        total_pnl += pnl
+    return total_pnl
+
+
+async def _trading_loop(config: BotConfig):
+    """Paper trading loop running while bot flag remains true"""
+    add_activity(
+        f"🤖 Paper trading loop: {config.agent} | size ${config.trade_size} | max {config.max_markets} markets"
+    )
+    app.state.equity_start = float(config.global_cap)
+    app.state.equity_peak = app.state.equity_start
+    gamma = app.state.gamma_client
+    try:
+        while app.state.bot_running:
+            markets_raw = gamma.get_current_markets(limit=config.max_markets * 3)
+            parsed_markets: Dict[str, MarketResponse] = {}
+
+            # Prepare market map and update price history
+            for raw in markets_raw:
+                market = parse_market(raw)
+                if config.markets and market.id not in config.markets:
+                    continue
+                parsed_markets[market.id] = market
+                _update_price_history(market.id, market.yes_price)
+
+            # Mark existing positions
+            total_pnl = _mark_positions(parsed_markets)
+            app.state.bot_stats["total_pnl"] = round(total_pnl, 2)
+            app.state.bot_stats["active_positions"] = len(app.state.positions)
+            app.state.bot_stats["trades_today"] = len(app.state.trades)
+
+            # Simple drawdown check
+            equity = app.state.equity_start + total_pnl
+            app.state.equity_peak = max(app.state.equity_peak, equity)
+            drawdown = app.state.equity_peak - equity
+            if drawdown >= config.drawdown_limit:
+                add_activity("⚠️ Drawdown limit hit - stopping bot")
+                app.state.bot_running = False
+                break
+
+            # Consider new trades
+            for market in list(parsed_markets.values())[: config.max_markets]:
+                if market.id in app.state.positions:
+                    continue
+                if _current_exposure() + config.trade_size > config.global_cap:
+                    break
+                if _per_market_exposure(market.id) + config.trade_size > config.per_market_cap:
+                    continue
+
+                signal = _momentum_signal(market)
+                if not signal:
+                    continue
+
+                entry_price = market.yes_price if signal == "yes" else market.no_price
+                position = {
+                    "market_id": market.id,
+                    "question": market.question,
+                    "side": signal,
+                    "size": float(config.trade_size),
+                    "entry_price": entry_price,
+                    "mark_price": entry_price,
+                    "unrealized_pnl": 0.0,
+                    "opened_at": datetime.now().isoformat(),
+                }
+                app.state.positions[market.id] = position
+                app.state.trades.insert(0, {
+                    "market_id": market.id,
+                    "question": market.question,
+                    "side": signal,
+                    "size": config.trade_size,
+                    "entry_price": entry_price,
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": "paper",
+                })
+                add_activity(
+                    f"🟢 Entered {signal.upper()} ${config.trade_size} on {market.question[:42]}... at {entry_price:.2f}"
+                )
+
+            await broadcast_update({
+                "type": "portfolio",
+                "running": app.state.bot_running,
+                "pnl": app.state.bot_stats["total_pnl"],
+                "positions": list(app.state.positions.values()),
+            })
+
+            await asyncio.sleep(max(5, config.poll_interval))
+    except asyncio.CancelledError:
+        add_activity("⚠️ Trading loop cancelled")
+    finally:
+        add_activity("🛑 Paper trading loop stopped")
 
 
 # ============================================================================
@@ -235,19 +421,50 @@ async def get_activity(limit: int = 20):
     return {"activities": app.state.activity_log[:limit]}
 
 
+@app.get("/api/bot/portfolio", response_model=PortfolioState)
+async def get_portfolio():
+    """Return current paper-trading portfolio snapshot"""
+    positions = []
+    for pos in app.state.positions.values():
+        positions.append(PositionSnapshot(
+            market_id=pos.get("market_id"),
+            question=pos.get("question", ""),
+            side=pos.get("side", ""),
+            size=float(pos.get("size", 0)),
+            entry_price=float(pos.get("entry_price", 0)),
+            mark_price=float(pos.get("mark_price", pos.get("entry_price", 0))),
+            unrealized_pnl=float(pos.get("unrealized_pnl", 0)),
+            last_update=pos.get("last_update", pos.get("opened_at", datetime.now().isoformat()))
+        ))
+    exposure = _current_exposure()
+    return PortfolioState(
+        positions=positions,
+        trades=app.state.trades[:50],
+        total_pnl=float(app.state.bot_stats.get("total_pnl", 0.0)),
+        exposure=exposure
+    )
+
+
 @app.post("/api/bot/start")
-async def start_bot(background_tasks: BackgroundTasks):
-    """Start the trading bot"""
+async def start_bot(config: BotConfig):
+    """Start the paper trading bot with runtime config"""
     if app.state.bot_running:
         raise HTTPException(status_code=400, detail="Bot already running")
     
     app.state.bot_running = True
+    app.state.bot_config = config
+    app.state.bot_stats["trades_today"] = 0
+    app.state.trades = []
+    app.state.positions = {}
+    app.state.price_history = {}
+    
+    # Launch background loop
+    app.state.bot_task = asyncio.create_task(_trading_loop(config))
     add_activity("🚀 Bot started")
     
-    # In production, start background trading loop here
-    await broadcast_update({"type": "status", "running": True})
+    await broadcast_update({"type": "status", "running": True, "config": config.model_dump()})
     
-    return {"success": True, "message": "Bot started"}
+    return {"success": True, "message": "Bot started", "config": config}
 
 
 @app.post("/api/bot/stop")
@@ -257,6 +474,9 @@ async def stop_bot():
         raise HTTPException(status_code=400, detail="Bot not running")
     
     app.state.bot_running = False
+    if app.state.bot_task:
+        app.state.bot_task.cancel()
+        app.state.bot_task = None
     add_activity("🛑 Bot stopped")
     
     await broadcast_update({"type": "status", "running": False})
@@ -395,6 +615,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/api/stats/summary")
 async def get_stats_summary():
     """Get trading statistics summary"""
+    exposure = _current_exposure()
     return {
         "today": {
             "trades": app.state.bot_stats["trades_today"],
@@ -407,7 +628,9 @@ async def get_stats_summary():
         },
         "bot": {
             "status": "running" if app.state.bot_running else "stopped",
-            "uptime": "0h 0m"  # Calculate in production
+            "uptime": "0h 0m",  # Calculate in production
+            "exposure": exposure,
+            "config": app.state.bot_config.model_dump() if app.state.bot_config else None
         }
     }
 

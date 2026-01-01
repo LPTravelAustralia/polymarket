@@ -176,26 +176,40 @@ export function Sidebar({
           </div>
 
           <div className="space-y-2 max-h-48 overflow-y-auto">
-            {portfolio.closed_trades.slice(0, 10).map((trade, idx) => (
-              <div key={idx} className="bg-black/30 rounded-xl p-3 text-sm">
-                <div className="flex justify-between items-center">
-                  <span className="truncate flex-1 mr-2" title={trade.question}>
-                    {trade.question.slice(0, 30)}...
-                  </span>
-                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                    trade.reason === 'TP' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                  }`}>
-                    {trade.reason}
-                  </span>
+            {portfolio.closed_trades.slice(0, 10).map((trade, idx) => {
+              const reasonStyles = {
+                'TP': 'bg-green-500/20 text-green-400',
+                'SL': 'bg-red-500/20 text-red-400',
+                'RESOLVED_WIN': 'bg-yellow-500/20 text-yellow-400',
+                'RESOLVED_LOSS': 'bg-gray-500/20 text-gray-400',
+              }
+              const reasonLabels = {
+                'TP': 'TP',
+                'SL': 'SL',
+                'RESOLVED_WIN': '🏆 WON',
+                'RESOLVED_LOSS': '💀 LOST',
+              }
+              return (
+                <div key={idx} className="bg-black/30 rounded-xl p-3 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="truncate flex-1 mr-2" title={trade.question}>
+                      {trade.question.slice(0, 30)}...
+                    </span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                      reasonStyles[trade.reason as keyof typeof reasonStyles] || 'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {reasonLabels[trade.reason as keyof typeof reasonLabels] || trade.reason}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-400 mt-1">
+                    <span>{trade.side.toUpperCase()} ${trade.size}</span>
+                    <span className={trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-xs text-gray-400 mt-1">
-                  <span>{trade.side.toUpperCase()} ${trade.size}</span>
-                  <span className={trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                    {trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

@@ -293,6 +293,8 @@ class MarketResponse(BaseModel):
     end_date: Optional[str] = None
     category: Optional[str] = None
     slug: Optional[str] = None
+    closed: bool = False
+    resolved_outcome: Optional[str] = None  # "yes", "no", or None if not resolved
 
 
 class BotStatus(BaseModel):
@@ -429,6 +431,16 @@ def parse_market(m: dict) -> MarketResponse:
     except:
         pass
     
+    # Check if market is closed/resolved
+    is_closed = m.get("closed", False)
+    resolved_outcome = None
+    if is_closed:
+        # If YES price is 1, YES won; if NO price is 1, NO won
+        if yes_price >= 0.99:
+            resolved_outcome = "yes"
+        elif no_price >= 0.99:
+            resolved_outcome = "no"
+    
     return MarketResponse(
         id=m.get("condition_id", m.get("id", "")),
         question=m.get("question", "Unknown"),
@@ -438,7 +450,9 @@ def parse_market(m: dict) -> MarketResponse:
         no_price=no_price,
         end_date=m.get("end_date_iso"),
         category=m.get("category"),
-        slug=m.get("slug")
+        slug=m.get("slug"),
+        closed=is_closed,
+        resolved_outcome=resolved_outcome
     )
 
 
@@ -593,8 +607,8 @@ No explanation needed, just the action."""
         return _momentum_signal(market)
 
 
-def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> float:
-    """Mark positions to market, check TP/SL, return total unrealized PnL"""
+async def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> float:
+    """Mark positions to market, check TP/SL and resolution, return total unrealized PnL"""
     total_pnl = 0.0
     positions_to_close = []
     
@@ -605,6 +619,22 @@ def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> fl
         side = pos.get("side")
         entry = float(pos.get("entry_price", 0))
         size = float(pos.get("size", 0))
+        
+        # Check if market has resolved
+        if market.closed and market.resolved_outcome:
+            # Calculate final PnL based on resolution
+            # If we bet on the winning side: payout = size (since shares pay $1)
+            # If we bet on the losing side: payout = 0
+            if market.resolved_outcome == side:
+                # We won! Payout is $1 per share, we paid entry_price per share
+                realized_pnl = (1.0 - entry) * size
+                positions_to_close.append((mid, pos, realized_pnl, "RESOLVED_WIN"))
+            else:
+                # We lost. Payout is $0, we paid entry_price per share
+                realized_pnl = -entry * size
+                positions_to_close.append((mid, pos, realized_pnl, "RESOLVED_LOSS"))
+            continue
+        
         mark_price = market.yes_price if side == "yes" else market.no_price
         pnl = (mark_price - entry) * size if side == "yes" else (entry - mark_price) * size
         pos["unrealized_pnl"] = pnl
@@ -621,8 +651,20 @@ def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> fl
     
     # Close triggered positions
     for mid, pos, realized_pnl, reason in positions_to_close:
-        emoji = "🟢" if reason == "TP" else "🔴"
-        add_activity(f"{emoji} {reason} closed {pos['side'].upper()} on {pos['question'][:35]}... PnL: ${realized_pnl:+.2f}")
+        if reason == "RESOLVED_WIN":
+            emoji = "🏆"
+            reason_display = "RESOLVED (WON)"
+        elif reason == "RESOLVED_LOSS":
+            emoji = "💀"
+            reason_display = "RESOLVED (LOST)"
+        elif reason == "TP":
+            emoji = "🟢"
+            reason_display = "TP"
+        else:
+            emoji = "🔴"
+            reason_display = "SL"
+            
+        add_activity(f"{emoji} {reason_display} closed {pos['side'].upper()} on {pos['question'][:35]}... PnL: ${realized_pnl:+.2f}")
         
         # Record closed trade
         closed_trade = {
@@ -631,7 +673,7 @@ def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> fl
             "side": pos.get("side"),
             "size": pos.get("size"),
             "entry_price": pos.get("entry_price"),
-            "exit_price": pos.get("mark_price"),
+            "exit_price": 1.0 if reason == "RESOLVED_WIN" else (0.0 if reason == "RESOLVED_LOSS" else pos.get("mark_price")),
             "pnl": realized_pnl,
             "reason": reason,
             "opened_at": pos.get("opened_at"),
@@ -646,6 +688,14 @@ def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig) -> fl
         # Remove from open positions
         del app.state.positions[mid]
         delete_position(mid)  # Remove from DB
+        
+        # Broadcast position close event
+        await broadcast_update({
+            "type": "close",
+            "reason": reason,
+            "trade": closed_trade,
+            "realized_pnl": app.state.realized_pnl,
+        })
     
     return total_pnl
 
@@ -676,10 +726,27 @@ async def _trading_loop(config: BotConfig):
                 if 0.05 <= market.yes_price <= 0.95 and market.liquidity >= 100:
                     tradeable_count += 1
             
+            # Also fetch closed markets where we have positions (for resolution detection)
+            position_ids = list(app.state.positions.keys())
+            missing_ids = [mid for mid in position_ids if mid not in parsed_markets]
+            if missing_ids:
+                # Fetch all markets (including closed) to check resolution status
+                try:
+                    all_markets_raw = gamma.get_markets(
+                        querystring_params={"limit": 500}  # Get more to find our positions
+                    )
+                    for raw in all_markets_raw:
+                        market = parse_market(raw)
+                        if market.id in missing_ids:
+                            parsed_markets[market.id] = market
+                            add_activity(f"📡 Checking resolution status for: {market.question[:40]}...")
+                except Exception as e:
+                    add_activity(f"⚠️ Could not check resolution: {str(e)[:30]}")
+            
             if not app.state.positions:  # Log once at start
                 add_activity(f"📊 Scanned {len(parsed_markets)} markets, {tradeable_count} in tradeable range")
             # Mark existing positions and check TP/SL
-            total_pnl = _mark_positions(parsed_markets, config)
+            total_pnl = await _mark_positions(parsed_markets, config)
             # Include realized PnL from closed trades
             total_pnl += app.state.realized_pnl
             app.state.bot_stats["total_pnl"] = round(total_pnl, 2)
@@ -747,6 +814,13 @@ async def _trading_loop(config: BotConfig):
                 add_activity(
                     f"🟢 Entered {signal.upper()} ${config.trade_size} on {market.question[:42]}... at {entry_price:.2f}"
                 )
+                
+                # Broadcast new trade event
+                await broadcast_update({
+                    "type": "trade",
+                    "trade": trade,
+                    "position": position,
+                })
 
             # Record equity snapshot for charting
             app.state.equity_history.append({

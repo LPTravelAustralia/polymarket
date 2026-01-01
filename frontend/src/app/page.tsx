@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Header } from '@/components/Header'
 import { StatsRow } from '@/components/StatsRow'
@@ -22,6 +22,12 @@ const DEFAULT_SETTINGS: BotConfig = {
   agent: 'momentum',
 }
 
+// WebSocket URL - uses same host as API in production
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 
+  (typeof window !== 'undefined' ? 
+    `ws://${window.location.hostname === 'localhost' ? 'localhost:8000' : '136.114.57.247:8000'}/ws` 
+    : 'ws://localhost:8000/ws')
+
 export default function Home() {
   const queryClient = useQueryClient()
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
@@ -29,6 +35,90 @@ export default function Home() {
   const [category, setCategory] = useState('all')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [botSettings, setBotSettings] = useState<BotConfig>(DEFAULT_SETTINGS)
+  const [wsConnected, setWsConnected] = useState(false)
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null)
+
+  // WebSocket connection for real-time updates
+  const connectWebSocket = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
+
+    try {
+      const ws = new WebSocket(WS_URL)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        console.log('🔌 WebSocket connected')
+        setWsConnected(true)
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          
+          if (data.type === 'portfolio') {
+            // Update portfolio with real-time data
+            queryClient.setQueryData(['portfolio'], (old: Portfolio | undefined) => ({
+              ...old,
+              positions: data.positions || [],
+              total_pnl: data.pnl ?? old?.total_pnl ?? 0,
+            }))
+            // Also update status
+            queryClient.setQueryData(['status'], (old: BotStatus | undefined) => ({
+              ...old,
+              running: data.running,
+            }))
+          } else if (data.type === 'trade') {
+            // New trade opened - refresh portfolio
+            queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+            queryClient.invalidateQueries({ queryKey: ['activity'] })
+          } else if (data.type === 'close') {
+            // Position closed (TP/SL/resolved) - refresh all
+            queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+            queryClient.invalidateQueries({ queryKey: ['activity'] })
+          } else if (data.type === 'activity') {
+            // Activity update
+            queryClient.invalidateQueries({ queryKey: ['activity'] })
+          }
+        } catch (e) {
+          console.warn('WebSocket message parse error:', e)
+        }
+      }
+
+      ws.onclose = () => {
+        console.log('🔌 WebSocket disconnected')
+        setWsConnected(false)
+        // Reconnect after 3 seconds
+        reconnectTimeout.current = setTimeout(connectWebSocket, 3000)
+      }
+
+      ws.onerror = (error) => {
+        console.warn('WebSocket error:', error)
+        ws.close()
+      }
+    } catch (e) {
+      console.warn('WebSocket connection failed:', e)
+      reconnectTimeout.current = setTimeout(connectWebSocket, 3000)
+    }
+  }, [queryClient])
+
+  // Connect WebSocket on mount
+  useEffect(() => {
+    connectWebSocket()
+
+    // Send ping every 25 seconds to keep connection alive
+    const pingInterval = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'ping' }))
+      }
+    }, 25000)
+
+    return () => {
+      clearInterval(pingInterval)
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
+      wsRef.current?.close()
+    }
+  }, [connectWebSocket])
 
   // Fetch markets
   const { data: markets, isLoading: marketsLoading } = useQuery({
@@ -36,18 +126,18 @@ export default function Home() {
     queryFn: () => api.getMarkets({ search: searchQuery, category, limit: 30 }),
   })
 
-  // Fetch bot status
+  // Fetch bot status - with WebSocket, we can poll less frequently
   const { data: status } = useQuery({
     queryKey: ['status'],
     queryFn: api.getStatus,
-    refetchInterval: 5000,
+    refetchInterval: wsConnected ? 30000 : 5000,
   })
 
-  // Fetch portfolio
+  // Fetch portfolio - with WebSocket, we can poll less frequently
   const { data: portfolio } = useQuery({
     queryKey: ['portfolio'],
     queryFn: api.getPortfolio,
-    refetchInterval: 5000,
+    refetchInterval: wsConnected ? 30000 : 5000,
   })
 
   // Fetch equity history for chart
@@ -95,7 +185,8 @@ export default function Home() {
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <Header 
-          isRunning={status?.running ?? false} 
+          isRunning={status?.running ?? false}
+          wsConnected={wsConnected}
         />
 
         <StatsRow 

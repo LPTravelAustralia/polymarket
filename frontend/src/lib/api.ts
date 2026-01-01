@@ -102,6 +102,12 @@ export interface BotConfig {
   stop_loss: number
 }
 
+export interface MarketsResponse {
+  markets: Market[]
+  total: number
+  showing: number
+}
+
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${endpoint}`, {
     ...options,
@@ -120,11 +126,19 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
 export const api = {
   // Markets
-  getMarkets: async (params?: { search?: string; category?: string; limit?: number }): Promise<Market[]> => {
+  getMarkets: async (params?: { 
+    search?: string
+    category?: string
+    limit?: number
+    offset?: number
+    sortBy?: string 
+  }): Promise<MarketsResponse> => {
     const searchParams = new URLSearchParams()
     if (params?.search) searchParams.set('search', params.search)
     if (params?.category && params.category !== 'all') searchParams.set('category', params.category)
     if (params?.limit) searchParams.set('limit', params.limit.toString())
+    if (params?.offset) searchParams.set('offset', params.offset.toString())
+    if (params?.sortBy) searchParams.set('sort_by', params.sortBy)
     
     const query = searchParams.toString()
     return fetchAPI(`/api/markets${query ? `?${query}` : ''}`)

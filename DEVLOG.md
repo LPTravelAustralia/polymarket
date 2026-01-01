@@ -11,9 +11,10 @@
 - [ ] None currently
 
 ### 🟡 Up Next (Priority)
-- [ ] Web dashboard for monitoring (frontend improvements)
 - [ ] Backtesting framework
 - [ ] Risk analytics dashboard
+- [ ] News API integration (for market context)
+- [ ] RAG-based market search (like official Polymarket agents)
 
 ### 🟢 Backlog
 - [ ] More trading strategies
@@ -30,6 +31,14 @@
 ---
 
 ## ✅ Completed Work
+
+### Phase 7: Dashboard Improvements (Jan 1, 2026) ✅
+- [x] **Fixed expired markets** - Filter out markets with past end dates
+- [x] **Increased market limit** - Now fetches 500 markets, shows top 50 sorted by volume
+- [x] **Added sorting** - Markets sorted by volume (highest first)
+- [x] **Total market count** - Shows real count of active markets (400+)
+- [x] **Enhanced categories** - More keywords for better filtering
+- [x] **API response format** - Added `total` and `showing` counts to response
 
 ### Phase 1: Core Infrastructure ✅
 - [x] `PolymarketClient` - CLOB API wrapper for trading

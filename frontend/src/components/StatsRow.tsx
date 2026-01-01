@@ -5,17 +5,18 @@ import { TrendingUp, DollarSign, BarChart3, Activity } from 'lucide-react'
 
 interface StatsRowProps {
   markets: Market[]
+  totalMarkets: number
   status?: BotStatus
 }
 
-export function StatsRow({ markets, status }: StatsRowProps) {
+export function StatsRow({ markets, totalMarkets, status }: StatsRowProps) {
   const totalLiquidity = markets.reduce((sum, m) => sum + m.liquidity, 0)
   const totalVolume = markets.reduce((sum, m) => sum + m.volume, 0)
 
   const stats = [
     {
       label: 'Active Markets',
-      value: markets.length.toString(),
+      value: totalMarkets > 0 ? totalMarkets.toString() : markets.length.toString(),
       icon: BarChart3,
       color: 'text-blue-400',
     },

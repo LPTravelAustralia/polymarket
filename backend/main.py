@@ -862,34 +862,69 @@ async def root():
     }
 
 
-@app.get("/api/markets", response_model=List[MarketResponse])
+class MarketsResponse(BaseModel):
+    """Response for markets endpoint with metadata"""
+    markets: List[MarketResponse]
+    total: int
+    showing: int
+
+
+@app.get("/api/markets")
 async def get_markets(
-    limit: int = 20,
+    limit: int = 50,
+    offset: int = 0,
     category: Optional[str] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    sort_by: str = "volume"  # volume, liquidity, end_date
 ):
-    """Get active markets from Polymarket"""
+    """Get active markets from Polymarket with filtering and sorting"""
     try:
-        if search:
-            markets = app.state.gamma_client.search_markets(search, limit=limit)
-        else:
-            markets = app.state.gamma_client.get_current_markets(limit=limit)
+        # Fetch more markets for better filtering (we'll paginate client-side)
+        fetch_limit = max(500, limit * 3)
         
-        result = [parse_market(m) for m in markets]
+        if search:
+            raw_markets = app.state.gamma_client.search_markets(search, limit=fetch_limit)
+        else:
+            raw_markets = app.state.gamma_client.get_current_markets(limit=fetch_limit)
+        
+        # Parse all markets
+        parsed = [parse_market(m) for m in raw_markets]
+        
+        # Filter out expired markets (end_date in the past)
+        now = datetime.now().isoformat()
+        active_markets = [
+            m for m in parsed 
+            if not m.end_date or m.end_date > now
+        ]
         
         # Filter by category if specified
         if category and category != "all":
             keywords = {
-                "politics": ["trump", "biden", "election", "president", "congress"],
-                "crypto": ["bitcoin", "btc", "ethereum", "crypto", "token"],
-                "sports": ["nfl", "nba", "mlb", "super bowl", "championship"],
-                "finance": ["fed", "rate", "inflation", "recession", "economy"]
+                "politics": ["trump", "biden", "election", "president", "congress", "senate", "governor", "vote"],
+                "crypto": ["bitcoin", "btc", "ethereum", "eth", "crypto", "token", "solana", "xrp"],
+                "sports": ["nfl", "nba", "mlb", "nhl", "super bowl", "championship", "win", "playoff", "bowl"],
+                "finance": ["fed", "rate", "inflation", "recession", "economy", "gdp", "deficit", "tariff"]
             }
             kws = keywords.get(category.lower(), [])
             if kws:
-                result = [m for m in result if any(kw in m.question.lower() for kw in kws)]
+                active_markets = [m for m in active_markets if any(kw in m.question.lower() for kw in kws)]
         
-        return result
+        # Sort markets
+        if sort_by == "volume":
+            active_markets.sort(key=lambda x: x.volume, reverse=True)
+        elif sort_by == "liquidity":
+            active_markets.sort(key=lambda x: x.liquidity, reverse=True)
+        elif sort_by == "end_date":
+            active_markets.sort(key=lambda x: x.end_date or "9999")
+        
+        total = len(active_markets)
+        paginated = active_markets[offset:offset + limit]
+        
+        return {
+            "markets": paginated,
+            "total": total,
+            "showing": len(paginated)
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

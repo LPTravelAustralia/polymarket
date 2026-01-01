@@ -8,7 +8,7 @@ import { MarketList } from '@/components/MarketList'
 import { Sidebar } from '@/components/Sidebar'
 import { MarketModal } from '@/components/MarketModal'
 import { SettingsPanel } from '@/components/SettingsPanel'
-import { api, Market, BotStatus, Portfolio, BotConfig } from '@/lib/api'
+import { api, Market, BotStatus, Portfolio, BotConfig, MarketsResponse } from '@/lib/api'
 
 const DEFAULT_SETTINGS: BotConfig = {
   trade_size: 25,
@@ -147,9 +147,9 @@ export default function Home() {
   }, [connectWebSocket])
 
   // Fetch markets
-  const { data: markets, isLoading: marketsLoading } = useQuery({
+  const { data: marketsData, isLoading: marketsLoading } = useQuery({
     queryKey: ['markets', searchQuery, category],
-    queryFn: () => api.getMarkets({ search: searchQuery, category, limit: 30 }),
+    queryFn: () => api.getMarkets({ search: searchQuery, category, limit: 50, sortBy: 'volume' }),
   })
 
   // Fetch bot status - with WebSocket, we can poll less frequently
@@ -217,14 +217,15 @@ export default function Home() {
         />
 
         <StatsRow 
-          markets={markets ?? []}
+          markets={marketsData?.markets ?? []}
+          totalMarkets={marketsData?.total ?? 0}
           status={status}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-3">
             <MarketList
-              markets={markets ?? []}
+              markets={marketsData?.markets ?? []}
               isLoading={marketsLoading}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}

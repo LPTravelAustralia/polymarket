@@ -22,13 +22,27 @@ const DEFAULT_SETTINGS: BotConfig = {
   agent: 'momentum',
 }
 
-// WebSocket URL - connect directly to backend for real-time updates
-// Note: Uses ws:// since backend doesn't have SSL. Browser may block on HTTPS sites.
+// WebSocket only works when:
+// - Running locally (localhost)
+// - Or backend has SSL (wss://)
+// HTTPS pages cannot connect to ws:// (mixed content blocked by browser)
+const canUseWebSocket = () => {
+  if (typeof window === 'undefined') return false
+  // Allow on localhost
+  if (window.location.hostname === 'localhost') return true
+  // Allow if page is HTTP (not HTTPS)
+  if (window.location.protocol === 'http:') return true
+  // Allow if we have a secure WebSocket URL configured
+  if (process.env.NEXT_PUBLIC_WS_URL?.startsWith('wss://')) return true
+  // Otherwise, HTTPS + ws:// = blocked by browser
+  return false
+}
+
 const getWsUrl = () => {
-  if (typeof window === 'undefined') return 'ws://localhost:8000/ws'
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
-  if (window.location.hostname === 'localhost') return 'ws://localhost:8000/ws'
-  // Production: connect directly to backend
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'ws://localhost:8000/ws'
+  }
   return 'ws://136.114.57.247:8000/ws'
 }
 
@@ -40,11 +54,17 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [botSettings, setBotSettings] = useState<BotConfig>(DEFAULT_SETTINGS)
   const [wsConnected, setWsConnected] = useState(false)
+  const [wsDisabled, setWsDisabled] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null)
 
   // WebSocket connection for real-time updates
   const connectWebSocket = useCallback(() => {
+    // Skip if WebSocket not supported in this context
+    if (!canUseWebSocket()) {
+      setWsDisabled(true)
+      return
+    }
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
     try {
@@ -193,6 +213,7 @@ export default function Home() {
         <Header 
           isRunning={status?.running ?? false}
           wsConnected={wsConnected}
+          wsDisabled={wsDisabled}
         />
 
         <StatsRow 

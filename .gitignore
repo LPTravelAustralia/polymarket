@@ -63,3 +63,5 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+frontend/node_modules/
+frontend/.next/

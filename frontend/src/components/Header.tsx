@@ -3,9 +3,10 @@
 interface HeaderProps {
   isRunning: boolean
   wsConnected?: boolean
+  wsDisabled?: boolean
 }
 
-export function Header({ isRunning, wsConnected }: HeaderProps) {
+export function Header({ isRunning, wsConnected, wsDisabled }: HeaderProps) {
   return (
     <header className="flex justify-between items-center py-6 border-b border-white/10 mb-8">
       <div className="flex items-center gap-3">
@@ -19,17 +20,19 @@ export function Header({ isRunning, wsConnected }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-3">
-        {/* WebSocket Status */}
-        <div className={`
-          px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
-          ${wsConnected 
-            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
-            : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
-          }
-        `} title={wsConnected ? 'Real-time updates active' : 'Polling for updates'}>
-          <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-blue-400' : 'bg-gray-400'}`} />
-          {wsConnected ? '⚡ Live' : '📡 Polling'}
-        </div>
+        {/* Connection Status */}
+        {!wsDisabled && (
+          <div className={`
+            px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
+            ${wsConnected 
+              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
+              : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+            }
+          `} title={wsConnected ? 'Real-time updates active' : 'Polling for updates'}>
+            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-blue-400' : 'bg-gray-400'}`} />
+            {wsConnected ? '⚡ Live' : '📡 Polling'}
+          </div>
+        )}
 
         {/* Bot Status */}
         <div className={`

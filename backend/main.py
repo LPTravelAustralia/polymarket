@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
     app.state.positions: Dict[str, Dict[str, Any]] = {}
     app.state.trades: List[Dict[str, Any]] = []
     app.state.price_history: Dict[str, deque] = {}
+    app.state.equity_history: List[Dict[str, Any]] = []  # For charting
     app.state.equity_start = 0.0
     app.state.equity_peak = 0.0
     app.state.connected_clients: List[WebSocket] = []
@@ -215,20 +216,31 @@ def _update_price_history(market_id: str, price: float):
 
 
 def _momentum_signal(market: MarketResponse) -> Optional[str]:
-    """Simple momentum/mean-reversion hybrid to keep demo trading sensible"""
-    history = app.state.price_history.get(market.id, deque())
-    if len(history) < 2:
+    """Pick markets with prices in tradeable range where movement matters"""
+    # Only trade markets with prices between 25% and 75% - these have real movement
+    if market.yes_price < 0.25 or market.yes_price > 0.75:
         return None
-    delta = history[-1] - history[-2]
-    if delta > 0.02 and market.yes_price < 0.7:
-        return "yes"
-    if delta < -0.02 and market.yes_price > 0.3:
-        return "no"
-    # Mild mispricing check
-    if market.yes_price < 0.4:
-        return "yes"
-    if market.yes_price > 0.6:
-        return "no"
+    
+    # Need some liquidity
+    if market.liquidity < 5000:
+        return None
+    
+    history = app.state.price_history.get(market.id, deque())
+    
+    # Momentum: if price is rising, go YES; if falling, go NO
+    if len(history) >= 2:
+        delta = history[-1] - history[-2]
+        if delta > 0.01:  # Price rising
+            return "yes"
+        if delta < -0.01:  # Price falling
+            return "no"
+    
+    # Mean reversion: bet against extremes within our range
+    if market.yes_price < 0.35:
+        return "yes"  # Underpriced, bet it goes up
+    if market.yes_price > 0.65:
+        return "no"  # Overpriced, bet it goes down
+    
     return None
 
 
@@ -324,6 +336,17 @@ async def _trading_loop(config: BotConfig):
                 add_activity(
                     f"🟢 Entered {signal.upper()} ${config.trade_size} on {market.question[:42]}... at {entry_price:.2f}"
                 )
+
+            # Record equity snapshot for charting
+            app.state.equity_history.append({
+                "timestamp": datetime.now().isoformat(),
+                "pnl": app.state.bot_stats["total_pnl"],
+                "positions": len(app.state.positions),
+                "exposure": _current_exposure(),
+            })
+            # Keep last 500 snapshots
+            if len(app.state.equity_history) > 500:
+                app.state.equity_history = app.state.equity_history[-500:]
 
             await broadcast_update({
                 "type": "portfolio",
@@ -457,6 +480,7 @@ async def start_bot(config: BotConfig):
     app.state.trades = []
     app.state.positions = {}
     app.state.price_history = {}
+    app.state.equity_history = []  # Reset chart data
     
     # Launch background loop
     app.state.bot_task = asyncio.create_task(_trading_loop(config))
@@ -482,6 +506,12 @@ async def stop_bot():
     await broadcast_update({"type": "status", "running": False})
     
     return {"success": True, "message": "Bot stopped"}
+
+
+@app.get("/api/bot/equity-history")
+async def get_equity_history():
+    """Return PnL history for charting"""
+    return {"history": app.state.equity_history}
 
 
 @app.post("/api/analyze/{market_id}", response_model=AnalysisResponse)

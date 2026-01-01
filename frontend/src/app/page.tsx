@@ -35,6 +35,13 @@ export default function Home() {
     refetchInterval: 5000,
   })
 
+  // Fetch equity history for chart
+  const { data: equityData } = useQuery({
+    queryKey: ['equity-history'],
+    queryFn: api.getEquityHistory,
+    refetchInterval: 5000,
+  })
+
   // Fetch activity
   const { data: activityData } = useQuery({
     queryKey: ['activity'],
@@ -98,6 +105,7 @@ export default function Home() {
             <Sidebar
               status={status}
               portfolio={portfolio}
+              equityHistory={equityData?.history ?? []}
               activities={activityData?.activities ?? []}
               onStart={() => startBot.mutate(undefined)}
               onStop={() => stopBot.mutate()}

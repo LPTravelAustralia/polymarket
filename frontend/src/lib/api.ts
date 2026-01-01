@@ -138,6 +138,10 @@ export const api = {
     return fetchAPI('/api/bot/portfolio')
   },
 
+  getEquityHistory: async (): Promise<{ history: { timestamp: string; pnl: number; positions: number; exposure: number }[] }> => {
+    return fetchAPI('/api/bot/equity-history')
+  },
+
   // Analysis
   analyzeMarket: async (marketId: string): Promise<Analysis> => {
     return fetchAPI(`/api/analyze/${marketId}`, { method: 'POST' })

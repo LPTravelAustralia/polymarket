@@ -1,11 +1,20 @@
 'use client'
 
 import { BotStatus, Portfolio, formatCurrency } from '@/lib/api'
+import { PnLChart } from './PnLChart'
 import { Play, Square, Activity, TrendingUp, Target, Clock, Wallet } from 'lucide-react'
+
+interface EquityPoint {
+  timestamp: string
+  pnl: number
+  positions: number
+  exposure: number
+}
 
 interface SidebarProps {
   status?: BotStatus
   portfolio?: Portfolio
+  equityHistory?: EquityPoint[]
   activities: string[]
   onStart: () => void
   onStop: () => void
@@ -16,6 +25,7 @@ interface SidebarProps {
 export function Sidebar({ 
   status, 
   portfolio,
+  equityHistory,
   activities, 
   onStart, 
   onStop, 
@@ -83,6 +93,16 @@ export function Sidebar({
           />
         </div>
       </div>
+
+      {/* P&L Chart */}
+      {status?.running && (
+        <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <span className="text-xl">📊</span> P&L Chart
+          </h2>
+          <PnLChart data={equityHistory ?? []} />
+        </div>
+      )}
 
       {/* Open Positions */}
       {portfolio?.positions && portfolio.positions.length > 0 && (

@@ -22,11 +22,15 @@ const DEFAULT_SETTINGS: BotConfig = {
   agent: 'momentum',
 }
 
-// WebSocket URL - uses same host as API in production
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 
-  (typeof window !== 'undefined' ? 
-    `ws://${window.location.hostname === 'localhost' ? 'localhost:8000' : '136.114.57.247:8000'}/ws` 
-    : 'ws://localhost:8000/ws')
+// WebSocket URL - connect directly to backend for real-time updates
+// Note: Uses ws:// since backend doesn't have SSL. Browser may block on HTTPS sites.
+const getWsUrl = () => {
+  if (typeof window === 'undefined') return 'ws://localhost:8000/ws'
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
+  if (window.location.hostname === 'localhost') return 'ws://localhost:8000/ws'
+  // Production: connect directly to backend
+  return 'ws://136.114.57.247:8000/ws'
+}
 
 export default function Home() {
   const queryClient = useQueryClient()
@@ -44,7 +48,9 @@ export default function Home() {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
     try {
-      const ws = new WebSocket(WS_URL)
+      const wsUrl = getWsUrl()
+      console.log('🔌 Connecting to WebSocket:', wsUrl)
+      const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
       ws.onopen = () => {

@@ -7,3 +7,10 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# Proxy API requests to the backend
+[[redirects]]
+  from = "/api/*"
+  to = "http://136.114.57.247:8000/api/:splat"
+  status = 200
+  force = true

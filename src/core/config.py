@@ -4,57 +4,60 @@ Configuration management for Polymarket Trading Bot
 import os
 from typing import Optional
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Config(BaseSettings):
     """Configuration class for the Polymarket Trading Bot"""
     
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        populate_by_name=True
+    )
+    
     # Polymarket API Configuration
-    polymarket_api_key: str = Field(default="", env="POLYMARKET_API_KEY")
-    polymarket_secret: str = Field(default="", env="POLYMARKET_SECRET")
-    polymarket_passphrase: str = Field(default="", env="POLYMARKET_PASSPHRASE")
+    polymarket_api_key: str = Field(default="")
+    polymarket_secret: str = Field(default="")
+    polymarket_passphrase: str = Field(default="")
     
     # Wallet Configuration
-    wallet_private_key: str = Field(default="", env="WALLET_PRIVATE_KEY")
-    wallet_address: str = Field(default="", env="WALLET_ADDRESS")
+    wallet_private_key: str = Field(default="")
+    wallet_address: str = Field(default="")
     
     # AI Configuration
-    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
+    openai_api_key: Optional[str] = Field(default=None)
+    anthropic_api_key: Optional[str] = Field(default=None)
     
     # Trading Configuration
-    default_trade_size: float = Field(default=10.0, env="DEFAULT_TRADE_SIZE")
-    max_position_size: float = Field(default=1000.0, env="MAX_POSITION_SIZE")
-    risk_percentage: float = Field(default=0.02, env="RISK_PERCENTAGE")
-    min_liquidity: float = Field(default=1000.0, env="MIN_LIQUIDITY")
+    default_trade_size: float = Field(default=10.0)
+    max_position_size: float = Field(default=1000.0)
+    risk_percentage: float = Field(default=0.02)
+    min_liquidity: float = Field(default=1000.0)
     
     # Fee Configuration
-    fee_percentage: float = Field(default=0.01, env="FEE_PERCENTAGE")
-    fee_wallet_address: str = Field(default="", env="FEE_WALLET_ADDRESS")
+    fee_percentage: float = Field(default=0.01)
+    fee_wallet_address: str = Field(default="")
     
     # Network Configuration
-    polygon_rpc_url: str = Field(default="https://polygon-rpc.com", env="POLYGON_RPC_URL")
-    chain_id: int = Field(default=137, env="CHAIN_ID")
+    polygon_rpc_url: str = Field(default="https://polygon-rpc.com")
+    chain_id: int = Field(default=137)
     
     # Bot Configuration
-    bot_mode: str = Field(default="testnet", env="BOT_MODE")
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
-    dry_run: bool = Field(default=True, env="DRY_RUN")
+    bot_mode: str = Field(default="testnet")
+    log_level: str = Field(default="INFO")
+    dry_run: bool = Field(default=True)
     
     # Database Configuration
-    database_url: str = Field(default="sqlite:///polymarket_bot.db", env="DATABASE_URL")
+    database_url: str = Field(default="sqlite:///polymarket_bot.db")
     
     # Advanced Configuration
-    use_ai_predictions: bool = Field(default=False, env="USE_AI_PREDICTIONS")
-    auto_trade: bool = Field(default=False, env="AUTO_TRADE")
-    monitoring_interval: int = Field(default=60, env="MONITORING_INTERVAL")
-    max_concurrent_trades: int = Field(default=5, env="MAX_CONCURRENT_TRADES")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    use_ai_predictions: bool = Field(default=False)
+    auto_trade: bool = Field(default=False)
+    monitoring_interval: int = Field(default=60)
+    max_concurrent_trades: int = Field(default=5)
 
 
 def load_config() -> Config:

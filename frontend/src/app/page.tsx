@@ -7,7 +7,7 @@ import { StatsRow } from '@/components/StatsRow'
 import { MarketList } from '@/components/MarketList'
 import { Sidebar } from '@/components/Sidebar'
 import { MarketModal } from '@/components/MarketModal'
-import { api, Market, BotStatus } from '@/lib/api'
+import { api, Market, BotStatus, Portfolio, BotConfig } from '@/lib/api'
 
 export default function Home() {
   const queryClient = useQueryClient()
@@ -28,6 +28,13 @@ export default function Home() {
     refetchInterval: 5000,
   })
 
+  // Fetch portfolio
+  const { data: portfolio } = useQuery({
+    queryKey: ['portfolio'],
+    queryFn: api.getPortfolio,
+    refetchInterval: 5000,
+  })
+
   // Fetch activity
   const { data: activityData } = useQuery({
     queryKey: ['activity'],
@@ -37,13 +44,19 @@ export default function Home() {
 
   // Bot controls
   const startBot = useMutation({
-    mutationFn: api.startBot,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['status'] }),
+    mutationFn: (config?: BotConfig) => api.startBot(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status'] })
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+    },
   })
 
   const stopBot = useMutation({
     mutationFn: api.stopBot,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['status'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status'] })
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+    },
   })
 
   // Analyze market
@@ -84,6 +97,7 @@ export default function Home() {
           <div className="lg:col-span-1">
             <Sidebar
               status={status}
+              portfolio={portfolio}
               activities={activityData?.activities ?? []}
               onStart={() => startBot.mutate()}
               onStop={() => stopBot.mutate()}

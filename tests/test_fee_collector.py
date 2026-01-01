@@ -2,15 +2,29 @@
 Tests for fee collector
 """
 import pytest
+from unittest.mock import Mock, patch, MagicMock
 from src.core.fee_collector import FeeCollector
 from src.core.config import Config
 
 
 @pytest.fixture
 def fee_collector():
-    """Create fee collector for testing"""
+    """Create fee collector for testing with mocked Web3"""
     config = Config(fee_percentage=0.02)
-    return FeeCollector(config)
+    
+    with patch('src.core.fee_collector.Web3') as mock_web3:
+        # Mock the Web3 instance and its methods
+        mock_w3_instance = MagicMock()
+        mock_web3.return_value = mock_w3_instance
+        mock_web3.HTTPProvider = Mock()
+        
+        # Mock get_block to return a fake timestamp
+        mock_w3_instance.eth.get_block.return_value = {'timestamp': 1234567890}
+        
+        collector = FeeCollector(config)
+        # Keep the mock active for the tests
+        collector.w3 = mock_w3_instance
+        yield collector
 
 
 def test_calculate_fee_positive_profit(fee_collector):

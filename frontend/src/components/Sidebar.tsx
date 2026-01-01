@@ -1,10 +1,11 @@
 'use client'
 
-import { BotStatus, formatCurrency } from '@/lib/api'
-import { Play, Square, Activity, TrendingUp, Target, Clock } from 'lucide-react'
+import { BotStatus, Portfolio, formatCurrency } from '@/lib/api'
+import { Play, Square, Activity, TrendingUp, Target, Clock, Wallet } from 'lucide-react'
 
 interface SidebarProps {
   status?: BotStatus
+  portfolio?: Portfolio
   activities: string[]
   onStart: () => void
   onStop: () => void
@@ -14,6 +15,7 @@ interface SidebarProps {
 
 export function Sidebar({ 
   status, 
+  portfolio,
   activities, 
   onStart, 
   onStop, 
@@ -64,23 +66,54 @@ export function Sidebar({
           <StatItem
             icon={TrendingUp}
             label="P&L"
-            value={formatCurrency(status?.total_pnl ?? 0)}
-            color={status?.total_pnl && status.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}
+            value={formatCurrency(portfolio?.total_pnl ?? status?.total_pnl ?? 0)}
+            color={(portfolio?.total_pnl ?? status?.total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}
           />
           <StatItem
-            icon={Target}
-            label="Win Rate"
-            value={`${Math.round((status?.win_rate ?? 0) * 100)}%`}
+            icon={Wallet}
+            label="Exposure"
+            value={formatCurrency(portfolio?.exposure ?? 0)}
             color="text-purple-400"
           />
           <StatItem
             icon={Clock}
             label="Positions"
-            value={status?.active_positions?.toString() ?? '0'}
+            value={portfolio?.positions?.length?.toString() ?? status?.active_positions?.toString() ?? '0'}
             color="text-yellow-400"
           />
         </div>
       </div>
+
+      {/* Open Positions */}
+      {portfolio?.positions && portfolio.positions.length > 0 && (
+        <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <span className="text-xl">💼</span> Positions
+          </h2>
+
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {portfolio.positions.map((pos) => (
+              <div key={pos.market_id} className="bg-black/30 rounded-xl p-3 text-sm">
+                <div className="font-medium truncate mb-1" title={pos.question}>
+                  {pos.question.slice(0, 35)}...
+                </div>
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span className={pos.side === 'yes' ? 'text-green-400' : 'text-red-400'}>
+                    {pos.side.toUpperCase()} ${pos.size}
+                  </span>
+                  <span className={pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                    {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>Entry: {(pos.entry_price * 100).toFixed(1)}¢</span>
+                  <span>Mark: {(pos.mark_price * 100).toFixed(1)}¢</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Activity Log */}
       <div className="bg-white/5 rounded-2xl p-6 border border-white/10">

@@ -47,20 +47,22 @@ class PolymarketClient:
             logger.error(f"Failed to initialize Polymarket client: {e}")
             raise
     
-    def get_markets(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_markets(self, next_cursor: str = "MA==") -> List[Dict[str, Any]]:
         """
         Get list of active markets
         
         Args:
-            limit: Maximum number of markets to return
-            offset: Offset for pagination
+            next_cursor: Cursor for pagination (default starts from beginning)
             
         Returns:
             List of market data dictionaries
         """
         try:
-            response = self.client.get_markets(limit=limit, offset=offset)
-            return response
+            response = self.client.get_markets(next_cursor=next_cursor)
+            # Response may be a dict with 'data' key or a list
+            if isinstance(response, dict):
+                return response.get('data', [])
+            return response if response else []
         except Exception as e:
             logger.error(f"Error fetching markets: {e}")
             return []

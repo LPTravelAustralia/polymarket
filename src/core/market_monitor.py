@@ -45,12 +45,12 @@ class MarketMonitor:
         """
         min_liq = min_liquidity or self.config.min_liquidity
         
-        markets = self.client.get_markets(limit=100)
+        markets = self.client.get_markets()
         filtered_markets = []
         
         for market in markets:
             # Check liquidity
-            liquidity = market.get("liquidity", 0)
+            liquidity = float(market.get("liquidity", 0) or 0)
             if liquidity < min_liq:
                 continue
             
@@ -62,8 +62,12 @@ class MarketMonitor:
             
             # Check if market is still active
             end_date = market.get("end_date")
-            if end_date and datetime.fromisoformat(end_date.replace('Z', '+00:00')) < datetime.now():
-                continue
+            if end_date:
+                try:
+                    if datetime.fromisoformat(end_date.replace('Z', '+00:00')) < datetime.now():
+                        continue
+                except (ValueError, TypeError):
+                    pass  # Skip date check if parsing fails
             
             filtered_markets.append(market)
         

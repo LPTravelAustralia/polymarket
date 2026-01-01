@@ -32,6 +32,45 @@ export interface Analysis {
   edge: number
 }
 
+export interface Position {
+  market_id: string
+  question: string
+  side: string
+  size: number
+  entry_price: number
+  mark_price: number
+  unrealized_pnl: number
+  last_update: string
+}
+
+export interface Trade {
+  market_id: string
+  question: string
+  side: string
+  size: number
+  entry_price: number
+  timestamp: string
+  mode: string
+}
+
+export interface Portfolio {
+  positions: Position[]
+  trades: Trade[]
+  total_pnl: number
+  exposure: number
+}
+
+export interface BotConfig {
+  trade_size: number
+  max_markets: number
+  per_market_cap: number
+  global_cap: number
+  drawdown_limit: number
+  poll_interval: number
+  agent: string
+  markets?: string[] | null
+}
+
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${endpoint}`, {
     ...options,
@@ -74,12 +113,29 @@ export const api = {
   },
 
   // Bot Controls
-  startBot: async (): Promise<{ success: boolean; message: string }> => {
-    return fetchAPI('/api/bot/start', { method: 'POST' })
+  startBot: async (config?: BotConfig): Promise<{ success: boolean; message: string; config?: BotConfig }> => {
+    const defaultConfig: BotConfig = {
+      trade_size: 25,
+      max_markets: 5,
+      per_market_cap: 100,
+      global_cap: 500,
+      drawdown_limit: 200,
+      poll_interval: 20,
+      agent: 'momentum',
+      markets: null,
+    }
+    return fetchAPI('/api/bot/start', {
+      method: 'POST',
+      body: JSON.stringify(config ?? defaultConfig),
+    })
   },
 
   stopBot: async (): Promise<{ success: boolean; message: string }> => {
     return fetchAPI('/api/bot/stop', { method: 'POST' })
+  },
+
+  getPortfolio: async (): Promise<Portfolio> => {
+    return fetchAPI('/api/bot/portfolio')
   },
 
   // Analysis

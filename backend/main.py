@@ -217,12 +217,12 @@ def _update_price_history(market_id: str, price: float):
 
 def _momentum_signal(market: MarketResponse) -> Optional[str]:
     """Pick markets with prices in tradeable range where movement matters"""
-    # Only trade markets with prices between 20% and 80% - these have real movement
-    if market.yes_price < 0.20 or market.yes_price > 0.80:
+    # Only trade markets with prices between 15% and 85%
+    if market.yes_price < 0.15 or market.yes_price > 0.85:
         return None
     
-    # Need some liquidity (lowered for demo)
-    if market.liquidity < 1000:
+    # Need some liquidity
+    if market.liquidity < 500:
         return None
     
     history = app.state.price_history.get(market.id, deque())
@@ -230,18 +230,16 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     # Momentum: if price is rising, go YES; if falling, go NO
     if len(history) >= 2:
         delta = history[-1] - history[-2]
-        if delta > 0.005:  # Price rising
+        if delta > 0.003:  # Price rising
             return "yes"
-        if delta < -0.005:  # Price falling
+        if delta < -0.003:  # Price falling
             return "no"
     
-    # Mean reversion: bet against extremes within our range
-    if market.yes_price < 0.40:
-        return "yes"  # Underpriced, bet it goes up
-    if market.yes_price > 0.60:
-        return "no"  # Overpriced, bet it goes down
-    
-    return None
+    # Mean reversion / value bet on first pass
+    if market.yes_price < 0.50:
+        return "yes"  # Below fair value, bet YES
+    else:
+        return "no"  # Above fair value, bet NO
 
 
 def _mark_positions(markets: Dict[str, MarketResponse]) -> float:

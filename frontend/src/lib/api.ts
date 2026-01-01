@@ -98,8 +98,8 @@ export interface BotConfig {
   poll_interval: number
   agent: string
   markets?: string[] | null
-  take_profit?: number
-  stop_loss?: number
+  take_profit: number
+  stop_loss: number
 }
 
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vercel.com/schema.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@api_url"
+  }
+}

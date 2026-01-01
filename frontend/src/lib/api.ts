@@ -154,6 +154,8 @@ export const api = {
       poll_interval: 20,
       agent: 'momentum',
       markets: null,
+      take_profit: 0.05,
+      stop_loss: 0.03,
     }
     return fetchAPI('/api/bot/start', {
       method: 'POST',

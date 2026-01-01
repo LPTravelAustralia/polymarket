@@ -217,12 +217,12 @@ def _update_price_history(market_id: str, price: float):
 
 def _momentum_signal(market: MarketResponse) -> Optional[str]:
     """Pick markets with prices in tradeable range where movement matters"""
-    # Only trade markets with prices between 15% and 85%
-    if market.yes_price < 0.15 or market.yes_price > 0.85:
+    # Trade markets with prices between 5% and 95% - very wide for demo
+    if market.yes_price < 0.05 or market.yes_price > 0.95:
         return None
     
-    # Need some liquidity
-    if market.liquidity < 500:
+    # Minimal liquidity requirement for demo
+    if market.liquidity < 100:
         return None
     
     history = app.state.price_history.get(market.id, deque())
@@ -271,7 +271,8 @@ async def _trading_loop(config: BotConfig):
     gamma = app.state.gamma_client
     try:
         while app.state.bot_running:
-            markets_raw = gamma.get_current_markets(limit=config.max_markets * 3)
+            # Fetch many markets since most are at extreme prices (resolved)
+            markets_raw = gamma.get_current_markets(limit=300)
             parsed_markets: Dict[str, MarketResponse] = {}
 
             # Prepare market map and update price history

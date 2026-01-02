@@ -2,6 +2,7 @@
 
 import { Market, Analysis, formatCurrency, formatPercent } from '@/lib/api'
 import { X, TrendingUp, TrendingDown, Minus, ExternalLink, Loader2 } from 'lucide-react'
+import { PriceChart } from './PriceChart'
 
 interface MarketModalProps {
   market: Market
@@ -73,6 +74,18 @@ export function MarketModal({ market, analysis, isAnalyzing, onClose }: MarketMo
               <span className="text-gray-400">Volume</span>
               <span className="font-medium">{formatCurrency(market.volume)}</span>
             </div>
+            {market.volume_24h && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">24h Volume</span>
+                <span className="font-medium">{formatCurrency(market.volume_24h)}</span>
+              </div>
+            )}
+            {market.spread && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Spread</span>
+                <span className="font-medium">{(market.spread * 100).toFixed(1)}%</span>
+              </div>
+            )}
             {market.end_date && (
               <div className="flex justify-between">
                 <span className="text-gray-400">End Date</span>
@@ -82,6 +95,13 @@ export function MarketModal({ market, analysis, isAnalyzing, onClose }: MarketMo
               </div>
             )}
           </div>
+
+          {/* Price Chart & Order Book */}
+          <PriceChart
+            marketId={market.id}
+            yesPrice={market.yes_price}
+            noPrice={market.no_price}
+          />
 
           {/* AI Analysis */}
           <div className="bg-white/5 rounded-xl p-4">

@@ -21,6 +21,20 @@ const DEFAULT_SETTINGS: BotConfig = {
   take_profit: 0.05,
   stop_loss: 0.03,
   agent: 'momentum',
+  // New settings with defaults
+  categories: [],
+  min_liquidity: 1000,
+  min_volume: 500,
+  max_spread: 0.1,
+  use_kelly_sizing: false,
+  kelly_fraction: 0.5,
+  min_edge: 0.05,
+  use_price_momentum: false,
+  momentum_period: 24,
+  use_volume_filter: false,
+  volume_spike_threshold: 2.0,
+  auto_exit_on_resolution: true,
+  time_to_expiry_filter: 24,
 }
 
 // WebSocket only works when:

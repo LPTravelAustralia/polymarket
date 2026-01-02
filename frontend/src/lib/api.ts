@@ -126,6 +126,20 @@ export interface BotConfig {
   markets?: string[] | null
   take_profit: number
   stop_loss: number
+  // Advanced settings
+  categories?: string[]
+  min_liquidity?: number
+  min_volume?: number
+  max_spread?: number
+  use_kelly_sizing?: boolean
+  kelly_fraction?: number
+  min_edge?: number
+  use_price_momentum?: boolean
+  momentum_period?: number
+  use_volume_filter?: boolean
+  volume_spike_threshold?: number
+  auto_exit_on_resolution?: boolean
+  time_to_expiry_filter?: number
 }
 
 export interface MarketsResponse {

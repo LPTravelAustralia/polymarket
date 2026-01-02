@@ -1304,7 +1304,7 @@ async def get_markets(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/markets/selectable")
+@app.get("/api/selectable-markets")
 async def get_selectable_markets(
     limit: int = 100,
     category: Optional[str] = None,

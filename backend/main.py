@@ -506,7 +506,7 @@ def parse_market(m: dict) -> MarketResponse:
             resolved_outcome = "no"
     
     return MarketResponse(
-        id=m.get("condition_id", m.get("id", "")),
+        id=m.get("conditionId", m.get("id", "")),
         question=m.get("question", "Unknown"),
         liquidity=float(m.get("liquidity", 0)),
         volume=float(m.get("volume", 0)),
@@ -514,13 +514,13 @@ def parse_market(m: dict) -> MarketResponse:
         yes_price=yes_price,
         no_price=no_price,
         spread=round(spread, 4),
-        end_date=m.get("end_date_iso"),
+        end_date=m.get("endDateIso") or m.get("end_date_iso"),
         category=m.get("category"),
         slug=m.get("slug"),
         closed=is_closed,
         resolved_outcome=resolved_outcome,
-        event_id=m.get("event_id") or m.get("eventId"),
-        event_slug=m.get("event_slug") or m.get("eventSlug"),
+        event_id=m.get("eventId") or m.get("event_id"),
+        event_slug=m.get("eventSlug") or m.get("event_slug"),
         description=m.get("description"),
         image=m.get("image")
     )
@@ -1369,10 +1369,17 @@ async def get_selectable_markets(
 async def get_market(market_id: str):
     """Get a specific market by ID"""
     try:
-        # For now, search in current markets
-        markets = app.state.gamma_client.get_current_markets(limit=100)
+        # Try to get market by ID directly from Gamma API
+        if market_id.isdigit():
+            market = app.state.gamma_client.get_market(int(market_id))
+            if market:
+                return parse_market(market)
+        
+        # Search in current markets (use more markets and correct field name)
+        markets = app.state.gamma_client.get_current_markets(limit=500)
         for m in markets:
-            if m.get("condition_id") == market_id or m.get("id") == market_id:
+            # Gamma API uses conditionId (camelCase), not condition_id
+            if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
                 return parse_market(m)
         raise HTTPException(status_code=404, detail="Market not found")
     except HTTPException:
@@ -1410,20 +1417,8 @@ async def get_events(
 ):
     """Get events with grouped markets"""
     try:
-        # Fetch events from Gamma API
+        # Fetch events from Gamma API - events include embedded markets!
         raw_events = app.state.gamma_client.get_current_events(limit=200)
-        
-        # Also fetch all markets to group them
-        raw_markets = app.state.gamma_client.get_current_markets(limit=500)
-        
-        # Build market lookup by event_id
-        markets_by_event: Dict[str, List] = {}
-        for m in raw_markets:
-            event_id = m.get("event_id") or m.get("eventId") or ""
-            if event_id:
-                if event_id not in markets_by_event:
-                    markets_by_event[event_id] = []
-                markets_by_event[event_id].append(m)
         
         # Filter out expired events
         now = datetime.now().isoformat()
@@ -1431,11 +1426,15 @@ async def get_events(
         events = []
         for e in raw_events:
             event_id = str(e.get("id", ""))
-            end_date = e.get("end_date_iso") or e.get("endDate")
+            # Gamma API uses camelCase: endDate not end_date_iso
+            end_date = e.get("endDate") or e.get("end_date_iso")
             
-            # Skip expired events
-            if end_date and end_date < now:
-                continue
+            # Skip expired events (compare date portion only)
+            if end_date:
+                end_date_str = end_date[:10] if len(end_date) >= 10 else end_date
+                now_str = now[:10]
+                if end_date_str < now_str:
+                    continue
             
             # Skip if search doesn't match
             if search:
@@ -1444,15 +1443,25 @@ async def get_events(
                 if search.lower() not in title and search.lower() not in desc:
                     continue
             
-            # Get markets for this event
-            event_markets = markets_by_event.get(event_id, [])
-            parsed_markets = [parse_market(m) for m in event_markets]
+            # Get markets embedded in the event (Gamma API includes them)
+            event_markets = e.get("markets", [])
             
-            # Filter out expired markets
-            parsed_markets = [m for m in parsed_markets if not m.end_date or m.end_date > now]
+            # Parse markets - filter out closed ones
+            parsed_markets = []
+            for m in event_markets:
+                if m.get("closed", False):
+                    continue
+                parsed_markets.append(parse_market(m))
             
-            total_volume = sum(m.volume for m in parsed_markets)
-            total_liquidity = sum(m.liquidity for m in parsed_markets)
+            # Use event-level volume/liquidity from Gamma API if available
+            total_volume = float(e.get("volume", 0) or 0)
+            total_liquidity = float(e.get("liquidity", 0) or 0)
+            
+            # Fall back to summing markets if not available
+            if total_volume == 0 and parsed_markets:
+                total_volume = sum(m.volume for m in parsed_markets)
+            if total_liquidity == 0 and parsed_markets:
+                total_liquidity = sum(m.liquidity for m in parsed_markets)
             
             events.append(EventResponse(
                 id=event_id,
@@ -1605,7 +1614,7 @@ async def get_market_news(market_id: str, limit: int = 5):
         markets = app.state.gamma_client.get_current_markets(limit=500)
         market = None
         for m in markets:
-            if m.get("condition_id") == market_id or str(m.get("id")) == market_id:
+            if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
                 market = m
                 break
         
@@ -1772,13 +1781,21 @@ async def get_equity_history():
 async def analyze_market(market_id: str):
     """Analyze a market using AI (demo mode)"""
     try:
-        # Get market
-        markets = app.state.gamma_client.get_current_markets(limit=100)
+        # Get market - try fetching directly first, then search in list
         market = None
-        for m in markets:
-            if m.get("condition_id") == market_id or m.get("id") == market_id:
-                market = m
-                break
+        
+        # Try to get market by ID directly from Gamma API
+        if market_id.isdigit():
+            market = app.state.gamma_client.get_market(int(market_id))
+        
+        # If not found, search in current markets
+        if not market:
+            markets = app.state.gamma_client.get_current_markets(limit=500)
+            for m in markets:
+                # Gamma API uses conditionId (camelCase), not condition_id
+                if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
+                    market = m
+                    break
         
         if not market:
             raise HTTPException(status_code=404, detail="Market not found")

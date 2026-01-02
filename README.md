@@ -2,12 +2,37 @@
 
 A comprehensive Python-based trading bot for Polymarket with AI-powered predictions, automated trading strategies, and fee collection mechanism.
 
+## 🚀 Live Demo
+
+**Frontend:** https://boisterous-basbousa-e11b8a.netlify.app/
+
+**Backend API:** http://136.114.57.247:8000/docs
+
+The bot is currently running in **paper trading mode** (simulated trades, no real money).
+
+## Current Status (January 2, 2026)
+
+| Component | Status |
+|-----------|--------|
+| Frontend UI | ✅ Live on Netlify |
+| Backend API | ✅ Running on GCloud VM |
+| 6 Trading Strategies | ✅ All Working |
+| Category Filtering | ✅ Working (10 categories) |
+| Kelly Criterion Sizing | ✅ Working |
+| Paper Trading | ✅ Working |
+| Live Trading | 🔴 Not enabled (needs wallet keys) |
+
+See [SETUP_REFERENCE.md](SETUP_REFERENCE.md) for detailed deployment info and TODO list.
+
 ## Features
 
 - 🤖 **Multiple Trading Strategies**
   - Momentum-based trading
-  - Arbitrage detection and execution
+  - Value (mean reversion)
+  - Arbitrage detection
+  - Combined (multi-signal weighted)
   - AI-powered predictions using GPT-4 or Claude
+  - News sentiment analysis
 
 - 💰 **Fee Collection System**
   - Configurable performance-based fees
@@ -21,8 +46,11 @@ A comprehensive Python-based trading bot for Polymarket with AI-powered predicti
   - Price tracking
 
 - 🛡️ **Risk Management**
+  - Kelly Criterion position sizing
   - Position size limits
   - Portfolio percentage controls
+  - Take profit / Stop loss
+  - Category filtering
   - Spread filtering
   - Dry-run mode for testing
 

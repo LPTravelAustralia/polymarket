@@ -328,6 +328,35 @@ class AnalysisResponse(BaseModel):
     edge: float
 
 
+# Category keywords for filtering markets
+CATEGORY_KEYWORDS = {
+    'politics': ['trump', 'biden', 'election', 'congress', 'senate', 'president', 'vote', 'democrat', 'republican', 'governor', 'mayor', 'political', 'government', 'white house', 'impeach'],
+    'sports': ['nfl', 'nba', 'mlb', 'nhl', 'super bowl', 'world series', 'championship', 'playoff', 'football', 'basketball', 'baseball', 'hockey', 'soccer', 'tennis', 'golf', 'ufc', 'boxing', 'olympics', 'fifa', 'world cup'],
+    'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'solana', 'sol', 'dogecoin', 'doge', 'xrp', 'cardano', 'blockchain', 'defi', 'nft', 'binance', 'coinbase', 'microstrategy'],
+    'finance': ['fed', 'federal reserve', 'interest rate', 'stock', 'market', 's&p', 'nasdaq', 'dow', 'gdp', 'inflation', 'recession', 'bank', 'treasury', 'bond', 'ipo', 'earnings'],
+    'entertainment': ['movie', 'film', 'oscar', 'grammy', 'emmy', 'album', 'box office', 'netflix', 'disney', 'spotify', 'celebrity', 'actor', 'actress', 'singer', 'concert', 'award'],
+    'tech': ['apple', 'google', 'microsoft', 'amazon', 'meta', 'facebook', 'twitter', 'x.com', 'elon', 'musk', 'ai', 'artificial intelligence', 'openai', 'chatgpt', 'tesla', 'spacex', 'iphone', 'android'],
+    'science': ['nasa', 'space', 'climate', 'vaccine', 'covid', 'health', 'fda', 'medicine', 'research', 'study', 'scientist', 'discovery', 'mars', 'moon', 'rocket'],
+    'world': ['ukraine', 'russia', 'china', 'war', 'nato', 'europe', 'asia', 'middle east', 'israel', 'gaza', 'iran', 'india', 'japan', 'uk', 'france', 'germany', 'canada', 'mexico', 'brazil'],
+    'elections': ['2024', '2025', '2026', 'election', 'vote', 'ballot', 'poll', 'primary', 'caucus', 'electoral', 'swing state', 'battleground'],
+    'ai': ['ai', 'artificial intelligence', 'openai', 'chatgpt', 'gpt', 'claude', 'anthropic', 'gemini', 'llm', 'machine learning', 'deep learning', 'neural'],
+}
+
+
+def market_matches_categories(question: str, categories: List[str]) -> bool:
+    """Check if a market question matches any of the specified categories"""
+    if not categories:
+        return True  # No filter = match all
+    
+    question_lower = question.lower()
+    for category in categories:
+        if category in CATEGORY_KEYWORDS:
+            for keyword in CATEGORY_KEYWORDS[category]:
+                if keyword in question_lower:
+                    return True
+    return False
+
+
 class BotConfig(BaseModel):
     """Runtime configuration for the paper-trading loop"""
     trade_size: float = 25.0
@@ -336,10 +365,29 @@ class BotConfig(BaseModel):
     global_cap: float = 500.0
     drawdown_limit: float = 200.0
     poll_interval: int = 20
-    agent: str = "momentum"  # momentum | ai
-    markets: Optional[List[str]] = None  # Optional allowlist of markets to trade
+    agent: str = "momentum"  # momentum | ai | arbitrage | value | news | combined
+    markets: Optional[List[str]] = None  # Optional allowlist of market IDs
     take_profit: float = 0.15  # Close position at +15% gain
     stop_loss: float = 0.10  # Close position at -10% loss
+    # Category filter
+    categories: Optional[List[str]] = None  # Filter by category: politics, sports, crypto, etc.
+    # Liquidity/Volume filters
+    min_liquidity: float = 1000.0  # Minimum liquidity in USD
+    min_volume: float = 0.0  # Minimum 24h volume
+    max_spread: float = 0.50  # Maximum bid-ask spread (0.50 = 50%)
+    # Kelly Criterion sizing
+    use_kelly_sizing: bool = False  # Use Kelly Criterion for position sizing
+    kelly_fraction: float = 0.25  # Fraction of Kelly to use (0.25 = quarter Kelly)
+    min_edge: float = 0.05  # Minimum edge required to trade (5%)
+    # Momentum settings
+    use_price_momentum: bool = True  # Consider price momentum
+    momentum_period: int = 5  # Number of price samples for momentum
+    # Volume filter
+    use_volume_filter: bool = False  # Filter by volume spikes
+    volume_spike_threshold: float = 2.0  # Multiple of avg volume
+    # Other
+    auto_exit_on_resolution: bool = True  # Auto-exit when market resolves
+    time_to_expiry_filter: int = 0  # Minimum hours until expiry (0 = disabled)
 
 
 class PositionSnapshot(BaseModel):
@@ -718,11 +766,94 @@ async def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig)
     return total_pnl
 
 
+def _calculate_kelly_size(config: BotConfig, market: MarketResponse, predicted_prob: float) -> float:
+    """Calculate position size using Kelly Criterion"""
+    if not config.use_kelly_sizing:
+        return config.trade_size
+    
+    # Get current price as implied probability
+    current_price = market.yes_price
+    
+    # Calculate edge
+    edge = predicted_prob - current_price
+    if abs(edge) < config.min_edge:
+        return 0.0  # No trade if edge too small
+    
+    # Kelly formula: f* = (bp - q) / b
+    # Where b = odds, p = win prob, q = lose prob
+    if edge > 0:  # Bet YES
+        b = (1 - current_price) / current_price  # Odds for YES
+        p = predicted_prob
+    else:  # Bet NO
+        b = current_price / (1 - current_price)  # Odds for NO
+        p = 1 - predicted_prob
+    
+    q = 1 - p
+    kelly_fraction_full = (b * p - q) / b if b > 0 else 0
+    
+    # Apply fractional Kelly
+    kelly_size = config.global_cap * kelly_fraction_full * config.kelly_fraction
+    
+    # Clamp to reasonable bounds
+    kelly_size = max(0, min(kelly_size, config.per_market_cap, config.trade_size * 3))
+    
+    return round(kelly_size, 2)
+
+
+def _passes_filters(market: MarketResponse, config: BotConfig) -> bool:
+    """Check if market passes all configured filters"""
+    # Category filter
+    if config.categories and len(config.categories) > 0:
+        if not market_matches_categories(market.question, config.categories):
+            return False
+    
+    # Liquidity filter
+    if market.liquidity < config.min_liquidity:
+        return False
+    
+    # Volume filter
+    if config.min_volume > 0 and (market.volume_24h or 0) < config.min_volume:
+        return False
+    
+    # Spread filter
+    if market.spread is not None and market.spread > config.max_spread:
+        return False
+    
+    # Price range filter (not at extremes)
+    if market.yes_price < 0.05 or market.yes_price > 0.95:
+        return False
+    
+    # Time to expiry filter
+    if config.time_to_expiry_filter > 0 and market.end_date:
+        try:
+            from datetime import timezone
+            end_dt = datetime.fromisoformat(market.end_date.replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            hours_remaining = (end_dt - now).total_seconds() / 3600
+            if hours_remaining < config.time_to_expiry_filter:
+                return False
+        except:
+            pass  # If we can't parse, allow the market
+    
+    return True
+
+
 async def _trading_loop(config: BotConfig):
     """Paper trading loop running while bot flag remains true"""
+    # Build descriptive startup message
+    filters_desc = []
+    if config.categories:
+        filters_desc.append(f"categories: {', '.join(config.categories)}")
+    if config.min_liquidity > 0:
+        filters_desc.append(f"min liq ${config.min_liquidity:,.0f}")
+    if config.use_kelly_sizing:
+        filters_desc.append(f"Kelly {config.kelly_fraction:.0%}")
+    
+    filter_str = f" | filters: {', '.join(filters_desc)}" if filters_desc else ""
     add_activity(
-        f"🤖 Paper trading loop: {config.agent} | size ${config.trade_size} | max {config.max_markets} markets"
+        f"🤖 Paper trading: {config.agent} | ${config.trade_size}/trade | max {config.max_markets}{filter_str}"
     )
+    
     app.state.equity_start = float(config.global_cap)
     app.state.equity_peak = app.state.equity_start
     gamma = app.state.gamma_client
@@ -734,15 +865,19 @@ async def _trading_loop(config: BotConfig):
 
             # Prepare market map and update price history
             tradeable_count = 0
+            filtered_count = 0
             for raw in markets_raw:
                 market = parse_market(raw)
+                # Apply market ID allowlist
                 if config.markets and market.id not in config.markets:
+                    continue
+                # Apply all filters
+                if not _passes_filters(market, config):
+                    filtered_count += 1
                     continue
                 parsed_markets[market.id] = market
                 _update_price_history(market.id, market.yes_price)
-                # Count how many are in tradeable range
-                if 0.05 <= market.yes_price <= 0.95 and market.liquidity >= 100:
-                    tradeable_count += 1
+                tradeable_count += 1
             
             # Also fetch closed markets where we have positions (for resolution detection)
             position_ids = list(app.state.positions.keys())
@@ -762,7 +897,8 @@ async def _trading_loop(config: BotConfig):
                     add_activity(f"⚠️ Could not check resolution: {str(e)[:30]}")
             
             if not app.state.positions:  # Log once at start
-                add_activity(f"📊 Scanned {len(parsed_markets)} markets, {tradeable_count} in tradeable range")
+                filter_msg = f" ({filtered_count} filtered out)" if filtered_count > 0 else ""
+                add_activity(f"📊 Scanned {len(markets_raw)} markets, {tradeable_count} passed filters{filter_msg}")
             # Mark existing positions and check TP/SL
             total_pnl = await _mark_positions(parsed_markets, config)
             # Include realized PnL from closed trades
@@ -787,9 +923,28 @@ async def _trading_loop(config: BotConfig):
                     break
                 if market.id in app.state.positions:
                     continue
-                if _current_exposure() + config.trade_size > config.global_cap:
+                
+                # Calculate trade size (Kelly or fixed)
+                if config.use_kelly_sizing:
+                    # For Kelly, we need a probability estimate
+                    # Use a simple momentum-based estimate for now
+                    momentum = _momentum_signal(market)
+                    if momentum == "yes":
+                        predicted_prob = min(0.95, market.yes_price + 0.1)
+                    elif momentum == "no":
+                        predicted_prob = max(0.05, market.yes_price - 0.1)
+                    else:
+                        predicted_prob = market.yes_price
+                    
+                    trade_size = _calculate_kelly_size(config, market, predicted_prob)
+                    if trade_size < 1.0:  # Skip if Kelly size too small
+                        continue
+                else:
+                    trade_size = config.trade_size
+                
+                if _current_exposure() + trade_size > config.global_cap:
                     break
-                if _per_market_exposure(market.id) + config.trade_size > config.per_market_cap:
+                if _per_market_exposure(market.id) + trade_size > config.per_market_cap:
                     continue
 
                 # Get signal based on selected agent
@@ -800,13 +955,21 @@ async def _trading_loop(config: BotConfig):
                     
                 if not signal:
                     continue
+                
+                # Check minimum edge requirement
+                if config.min_edge > 0:
+                    current_price = market.yes_price if signal == "yes" else market.no_price
+                    # Simple edge calculation: if we're betting YES at 0.4, we think it should be higher
+                    implied_edge = 0.1 if signal == "yes" else 0.1  # Simplified
+                    if implied_edge < config.min_edge:
+                        continue
 
                 entry_price = market.yes_price if signal == "yes" else market.no_price
                 position = {
                     "market_id": market.id,
                     "question": market.question,
                     "side": signal,
-                    "size": float(config.trade_size),
+                    "size": float(trade_size),
                     "entry_price": entry_price,
                     "mark_price": entry_price,
                     "unrealized_pnl": 0.0,
@@ -820,7 +983,7 @@ async def _trading_loop(config: BotConfig):
                     "market_id": market.id,
                     "question": market.question,
                     "side": signal,
-                    "size": config.trade_size,
+                    "size": trade_size,
                     "entry_price": entry_price,
                     "timestamp": datetime.now().isoformat(),
                     "mode": "paper",
@@ -829,8 +992,9 @@ async def _trading_loop(config: BotConfig):
                 save_trade(trade)  # Persist to DB
                 
                 trades_opened += 1
+                kelly_note = " (Kelly)" if config.use_kelly_sizing else ""
                 add_activity(
-                    f"🟢 Entered {signal.upper()} ${config.trade_size} on {market.question[:42]}... at {entry_price:.2f}"
+                    f"🟢 Entered {signal.upper()} ${trade_size}{kelly_note} on {market.question[:38]}... at {entry_price:.2f}"
                 )
                 
                 # Broadcast new trade event

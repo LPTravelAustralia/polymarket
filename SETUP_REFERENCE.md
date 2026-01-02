@@ -95,21 +95,64 @@ All these settings work from the frontend Settings panel:
 
 ---
 
-## Quick Commands
+## 🚀 DEPLOYMENT PROCESS (IMPORTANT!)
 
-### Deploy Code Updates to VM
+This project uses **remote deployment only** - NOT local development servers.
 
+### Architecture Reminder
+- **Frontend**: Hosted on Netlify (auto-deploys on git push)
+- **Backend**: Hosted on GCloud VM at `136.114.57.247:8000`
+- **API Proxy**: Netlify proxies `/api/*` requests to the GCloud backend
+
+### Step-by-Step: Deploy Code Changes
+
+#### 1. Push code to GitHub (from dev container or local)
 ```bash
-# Run on VM via SSH:
+git add -A && git commit -m "your message" && git push
+```
+- Frontend auto-deploys to Netlify within ~1-2 minutes
+
+#### 2. SSH into GCloud VM
+**Option A - Browser SSH (recommended):**
+```
+https://ssh.cloud.google.com/v2/ssh/projects/polymarket-482905/zones/us-central1-a/instances/polymarket-bot
+```
+
+**Option B - gcloud CLI (if installed):**
+```bash
+gcloud compute ssh polymarket-bot --zone=us-central1-a --project=polymarket-482905
+```
+
+#### 3. Pull and restart backend (run ON the VM)
+```bash
 cd ~/polymarket && git pull && find . -name "*.pyc" -delete && sudo systemctl restart polymarket-bot
 ```
 
-### If Port 8000 is stuck (Address in use error)
-
+#### 4. If you get "Address already in use" error
 ```bash
-# Run on VM:
 sudo fuser -k 8000/tcp && sleep 2 && sudo systemctl start polymarket-bot
 ```
+
+#### 5. Verify backend is running
+```bash
+sudo systemctl status polymarket-bot
+```
+
+### Quick Test Commands (run from anywhere)
+```bash
+# Test backend health
+curl http://136.114.57.247:8000/api/status
+
+# Test events endpoint
+curl "http://136.114.57.247:8000/api/events?limit=2"
+
+# Test analyze endpoint
+curl -X POST "http://136.114.57.247:8000/api/analyze/553883"
+```
+
+---
+
+## Quick Commands (On VM via SSH)
 
 ### Check Backend Status
 

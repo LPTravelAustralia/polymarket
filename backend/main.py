@@ -330,16 +330,16 @@ class AnalysisResponse(BaseModel):
 
 # Category keywords for filtering markets
 CATEGORY_KEYWORDS = {
-    'politics': ['trump', 'biden', 'election', 'congress', 'senate', 'president', 'vote', 'democrat', 'republican', 'governor', 'mayor', 'political', 'government', 'white house', 'impeach'],
-    'sports': ['nfl', 'nba', 'mlb', 'nhl', 'super bowl', 'world series', 'championship', 'playoff', 'football', 'basketball', 'baseball', 'hockey', 'soccer', 'tennis', 'golf', 'ufc', 'boxing', 'olympics', 'fifa', 'world cup'],
-    'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'solana', 'sol', 'dogecoin', 'doge', 'xrp', 'cardano', 'blockchain', 'defi', 'nft', 'binance', 'coinbase', 'microstrategy'],
-    'finance': ['fed', 'federal reserve', 'interest rate', 'stock', 'market', 's&p', 'nasdaq', 'dow', 'gdp', 'inflation', 'recession', 'bank', 'treasury', 'bond', 'ipo', 'earnings'],
-    'entertainment': ['movie', 'film', 'oscar', 'grammy', 'emmy', 'album', 'box office', 'netflix', 'disney', 'spotify', 'celebrity', 'actor', 'actress', 'singer', 'concert', 'award'],
-    'tech': ['apple', 'google', 'microsoft', 'amazon', 'meta', 'facebook', 'twitter', 'x.com', 'elon', 'musk', 'ai', 'artificial intelligence', 'openai', 'chatgpt', 'tesla', 'spacex', 'iphone', 'android'],
-    'science': ['nasa', 'space', 'climate', 'vaccine', 'covid', 'health', 'fda', 'medicine', 'research', 'study', 'scientist', 'discovery', 'mars', 'moon', 'rocket'],
-    'world': ['ukraine', 'russia', 'china', 'war', 'nato', 'europe', 'asia', 'middle east', 'israel', 'gaza', 'iran', 'india', 'japan', 'uk', 'france', 'germany', 'canada', 'mexico', 'brazil'],
-    'elections': ['2024', '2025', '2026', 'election', 'vote', 'ballot', 'poll', 'primary', 'caucus', 'electoral', 'swing state', 'battleground'],
-    'ai': ['ai', 'artificial intelligence', 'openai', 'chatgpt', 'gpt', 'claude', 'anthropic', 'gemini', 'llm', 'machine learning', 'deep learning', 'neural'],
+    'politics': ['trump', 'biden', 'election', 'congress', 'senate', 'president', 'vote', 'democrat', 'republican', 'governor', 'mayor', 'political', 'government', 'white house', 'impeach', 'gop', 'dnc', 'rnc', 'pelosi', 'mcconnell', 'desantis', 'newsom', 'vance', 'harris', 'pence'],
+    'sports': ['nfl', 'nba', 'mlb', 'nhl', 'super bowl', 'world series', 'championship', 'playoff', 'football', 'basketball', 'baseball', 'hockey', 'soccer', 'tennis', 'golf', 'ufc', 'boxing', 'olympics', 'fifa', 'world cup', 'nfc', 'afc', 'mvp', 'touchdown', 'quarterback', 'lakers', 'warriors', 'celtics', 'yankees', 'dodgers', 'chiefs', 'eagles', 'cowboys', 'patriots', 'steelers', 'packers', 'bills', 'ravens', '49ers', 'rams', 'seahawks', 'broncos', 'texans', 'bears', 'lions', 'vikings', 'saints', 'falcons', 'panthers', 'buccaneers', 'cardinals', 'titans', 'colts', 'jaguars', 'bengals', 'browns', 'chargers', 'raiders', 'dolphins', 'jets', 'giants', 'commanders', 'thunder', 'heat', 'mavericks', 'suns', 'nuggets', 'clippers', 'grizzlies', 'pelicans', 'spurs', 'rockets', 'timberwolves', 'blazers', 'jazz', 'kings', 'hornets', 'hawks', 'bulls', 'cavaliers', 'pistons', 'pacers', 'bucks', 'magic', 'nets', 'knicks', 'sixers', 'raptors', 'wizards'],
+    'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'solana', 'sol', 'dogecoin', 'doge', 'xrp', 'ripple', 'cardano', 'ada', 'blockchain', 'defi', 'nft', 'binance', 'coinbase', 'microstrategy', 'saylor', 'altcoin', 'memecoin', 'meme coin', 'token', 'airdrop', 'staking', 'mining', 'halving', 'whale', 'hodl', 'satoshi', 'web3', 'polygon', 'matic', 'avalanche', 'avax', 'chainlink', 'link', 'uniswap', 'aave', 'maker', 'dai', 'usdc', 'usdt', 'tether', 'stablecoin', 'cbdc', 'lighter', 'megaeth', 'gta vi', 'gta 6'],
+    'finance': ['fed', 'federal reserve', 'interest rate', 'stock', 'market', 's&p', 'nasdaq', 'dow', 'gdp', 'inflation', 'recession', 'bank', 'treasury', 'bond', 'ipo', 'earnings', 'tariff', 'deficit', 'debt ceiling', 'fomc', 'rate cut', 'rate hike', 'unemployment', 'jobs report', 'cpi', 'ppi'],
+    'entertainment': ['movie', 'film', 'oscar', 'grammy', 'emmy', 'album', 'box office', 'netflix', 'disney', 'spotify', 'celebrity', 'actor', 'actress', 'singer', 'concert', 'award', 'taylor swift', 'drake', 'beyonce', 'marvel', 'dc', 'star wars', 'minecraft', 'zootopia', 'fantastic four', 'jurassic', 'pixar', 'dreamworks'],
+    'tech': ['apple', 'google', 'microsoft', 'amazon', 'meta', 'facebook', 'twitter', 'x.com', 'elon', 'musk', 'ai', 'artificial intelligence', 'openai', 'chatgpt', 'tesla', 'spacex', 'iphone', 'android', 'nvidia', 'amd', 'intel', 'semiconductor', 'chip', 'starlink', 'neuralink', 'boring company', 'zuckerberg', 'pichai', 'nadella', 'cook', 'altman', 'sam altman'],
+    'science': ['nasa', 'space', 'climate', 'vaccine', 'covid', 'health', 'fda', 'medicine', 'research', 'study', 'scientist', 'discovery', 'mars', 'moon', 'rocket', 'spacex', 'blue origin', 'artemis', 'asteroid', 'comet', 'earthquake', 'hurricane', 'tornado'],
+    'world': ['ukraine', 'russia', 'china', 'war', 'nato', 'europe', 'asia', 'middle east', 'israel', 'gaza', 'iran', 'india', 'japan', 'uk', 'france', 'germany', 'canada', 'mexico', 'brazil', 'putin', 'zelensky', 'netanyahu', 'xi jinping', 'modi', 'macron', 'starmer', 'venezuela', 'maduro', 'taiwan', 'korea', 'kim jong'],
+    'elections': ['2024', '2025', '2026', 'election', 'vote', 'ballot', 'poll', 'primary', 'caucus', 'electoral', 'swing state', 'battleground', 'midterm', 'runoff'],
+    'ai': ['ai', 'artificial intelligence', 'openai', 'chatgpt', 'gpt', 'claude', 'anthropic', 'gemini', 'llm', 'machine learning', 'deep learning', 'neural', 'agi', 'superintelligence', 'grok', 'copilot', 'midjourney', 'stable diffusion', 'dall-e'],
 }
 
 
@@ -385,9 +385,13 @@ class BotConfig(BaseModel):
     # Volume filter
     use_volume_filter: bool = False  # Filter by volume spikes
     volume_spike_threshold: float = 2.0  # Multiple of avg volume
+    min_volume_24h: float = 0.0  # Minimum 24h volume required (0 = disabled)
     # Other
     auto_exit_on_resolution: bool = True  # Auto-exit when market resolves
     time_to_expiry_filter: int = 0  # Minimum hours until expiry (0 = disabled)
+    # Volatility filter
+    min_volatility: float = 0.0  # Minimum price volatility (0 = disabled)
+    prefer_active_markets: bool = True  # Prefer markets with recent activity
 
 
 class PositionSnapshot(BaseModel):
@@ -549,9 +553,178 @@ def _per_market_exposure(market_id: str) -> float:
 def _update_price_history(market_id: str, price: float):
     history = app.state.price_history.get(market_id)
     if not history:
-        history = deque(maxlen=5)
+        history = deque(maxlen=20)  # Increased for better momentum detection
         app.state.price_history[market_id] = history
     history.append(price)
+
+
+def _calculate_volatility(market_id: str) -> float:
+    """Calculate price volatility from history"""
+    history = app.state.price_history.get(market_id)
+    if not history or len(history) < 3:
+        return 0.0
+    prices = list(history)
+    if len(prices) < 2:
+        return 0.0
+    # Calculate standard deviation of price changes
+    changes = [abs(prices[i] - prices[i-1]) for i in range(1, len(prices))]
+    avg_change = sum(changes) / len(changes) if changes else 0
+    return avg_change
+
+
+def _value_signal(market: MarketResponse) -> Optional[str]:
+    """Value betting strategy - find mispriced markets"""
+    # Trade markets with prices in tradeable range
+    if market.yes_price < 0.10 or market.yes_price > 0.90:
+        return None
+    
+    if market.liquidity < 1000:
+        return None
+    
+    # Look for markets with high spread (potential inefficiency)
+    spread = abs(market.yes_price + market.no_price - 1.0)
+    if spread > 0.02:  # >2% spread suggests mispricing
+        # Bet on the side that seems underpriced
+        if market.yes_price < 0.50:
+            return "yes"  # YES seems cheap
+        else:
+            return "no"  # NO seems cheap
+    
+    # Look for extreme volume relative to liquidity (lots of interest)
+    if market.volume_24h and market.liquidity:
+        volume_ratio = market.volume_24h / market.liquidity
+        if volume_ratio > 0.5:  # High activity market
+            # Bet with the recent flow (price direction)
+            history = app.state.price_history.get(market.id, deque())
+            if len(history) >= 2:
+                if history[-1] > history[0]:
+                    return "yes"
+                elif history[-1] < history[0]:
+                    return "no"
+    
+    return None
+
+
+def _arbitrage_signal(market: MarketResponse) -> Optional[str]:
+    """Arbitrage strategy - find markets where YES + NO != 100%"""
+    if market.yes_price < 0.05 or market.yes_price > 0.95:
+        return None
+    
+    if market.liquidity < 500:
+        return None
+    
+    # Check for arbitrage opportunity
+    total = market.yes_price + market.no_price
+    
+    # If total > 1.0, both sides are overpriced (rare)
+    # If total < 1.0, there's a gap we can exploit
+    if total < 0.98:  # 2%+ gap
+        # Buy the cheaper side
+        if market.yes_price < market.no_price:
+            return "yes"
+        else:
+            return "no"
+    elif total > 1.02:  # Overpriced, could short but we can't
+        return None
+    
+    return None
+
+
+def _combined_signal(market: MarketResponse) -> Optional[str]:
+    """Combined multi-strategy signal"""
+    signals = []
+    weights = []
+    
+    # Get momentum signal
+    mom = _momentum_signal(market)
+    if mom:
+        signals.append(1 if mom == "yes" else -1)
+        weights.append(0.4)  # 40% weight
+    
+    # Get value signal
+    val = _value_signal(market)
+    if val:
+        signals.append(1 if val == "yes" else -1)
+        weights.append(0.35)  # 35% weight
+    
+    # Get arbitrage signal
+    arb = _arbitrage_signal(market)
+    if arb:
+        signals.append(1 if arb == "yes" else -1)
+        weights.append(0.25)  # 25% weight
+    
+    if not signals:
+        return None
+    
+    # Weighted average
+    weighted_sum = sum(s * w for s, w in zip(signals, weights))
+    total_weight = sum(weights)
+    
+    if total_weight > 0:
+        score = weighted_sum / total_weight
+        if score > 0.3:
+            return "yes"
+        elif score < -0.3:
+            return "no"
+    
+    return None
+
+
+async def _news_signal(market: MarketResponse) -> Optional[str]:
+    """
+    News-based signal - requires NEWSAPI_KEY environment variable.
+    Analyzes recent news sentiment related to the market question.
+    Falls back to momentum if news API is not available.
+    """
+    import os
+    if not os.getenv("NEWSAPI_KEY"):
+        # Fall back to momentum when API key not available
+        return _momentum_signal(market)
+    
+    try:
+        from src.connectors.news import NewsConnector
+        connector = NewsConnector()
+        
+        # Extract key terms from market question
+        question = market.question.lower()
+        keywords = []
+        for word in question.split():
+            if len(word) > 3 and word not in ['will', 'what', 'when', 'does', 'have', 'been', 'this', 'that', 'with', 'from']:
+                keywords.append(word)
+        
+        if not keywords:
+            return _momentum_signal(market)
+        
+        # Search for news articles
+        articles = connector.search(query=" ".join(keywords[:5]), limit=5)
+        
+        if not articles:
+            return _momentum_signal(market)
+        
+        # Simple sentiment analysis based on keywords
+        positive_words = ['win', 'success', 'approve', 'pass', 'rise', 'gain', 'positive', 'likely', 'expected', 'confirm']
+        negative_words = ['lose', 'fail', 'reject', 'drop', 'fall', 'negative', 'unlikely', 'denied', 'cancel']
+        
+        sentiment_score = 0
+        for article in articles:
+            content = f"{article.get('title', '')} {article.get('description', '')}".lower()
+            for word in positive_words:
+                sentiment_score += content.count(word)
+            for word in negative_words:
+                sentiment_score -= content.count(word)
+        
+        # Bias toward YES if positive news, NO if negative
+        if sentiment_score > 2:
+            return "yes"
+        elif sentiment_score < -2:
+            return "no"
+        
+        # Neutral or mixed news - use momentum as tie-breaker
+        return _momentum_signal(market)
+        
+    except Exception as e:
+        logger.warning(f"News signal error: {e}")
+        return _momentum_signal(market)
 
 
 def _momentum_signal(market: MarketResponse) -> Optional[str]:
@@ -811,8 +984,12 @@ def _passes_filters(market: MarketResponse, config: BotConfig) -> bool:
     if market.liquidity < config.min_liquidity:
         return False
     
-    # Volume filter
+    # Volume filter (legacy)
     if config.min_volume > 0 and (market.volume_24h or 0) < config.min_volume:
+        return False
+    
+    # 24h volume filter (new)
+    if config.min_volume_24h > 0 and (market.volume_24h or 0) < config.min_volume_24h:
         return False
     
     # Spread filter
@@ -822,6 +999,14 @@ def _passes_filters(market: MarketResponse, config: BotConfig) -> bool:
     # Price range filter (not at extremes)
     if market.yes_price < 0.05 or market.yes_price > 0.95:
         return False
+    
+    # Volatility filter - estimate from spread and price
+    if config.min_volatility > 0:
+        # Estimate volatility as spread relative to price midpoint
+        midpoint = max(market.yes_price, 0.01)
+        estimated_volatility = (market.spread or 0.05) / midpoint if market.spread else 0.05
+        if estimated_volatility < config.min_volatility:
+            return False
     
     # Time to expiry filter
     if config.time_to_expiry_filter > 0 and market.end_date:
@@ -859,8 +1044,8 @@ async def _trading_loop(config: BotConfig):
     gamma = app.state.gamma_client
     try:
         while app.state.bot_running:
-            # Fetch many markets since most are at extreme prices (resolved)
-            markets_raw = gamma.get_current_markets(limit=300)
+            # Fetch many markets - increased limit for better coverage
+            markets_raw = gamma.get_current_markets(limit=500)
             parsed_markets: Dict[str, MarketResponse] = {}
 
             # Prepare market map and update price history
@@ -950,7 +1135,15 @@ async def _trading_loop(config: BotConfig):
                 # Get signal based on selected agent
                 if config.agent == "ai":
                     signal = await _ai_signal(market)
-                else:
+                elif config.agent == "value":
+                    signal = _value_signal(market)
+                elif config.agent == "arbitrage":
+                    signal = _arbitrage_signal(market)
+                elif config.agent == "combined":
+                    signal = _combined_signal(market)
+                elif config.agent == "news":
+                    signal = await _news_signal(market)
+                else:  # momentum (default)
                     signal = _momentum_signal(market)
                     
                 if not signal:
@@ -1123,6 +1316,67 @@ async def get_market(market_id: str):
         raise HTTPException(status_code=404, detail="Market not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/markets/selectable")
+async def get_selectable_markets(
+    limit: int = 100,
+    category: Optional[str] = None,
+    min_liquidity: float = 1000.0,
+    search: Optional[str] = None
+):
+    """
+    Get markets available for manual selection.
+    Returns markets sorted by volume, filtered for activity and liquidity.
+    Designed for populating a market selection UI.
+    """
+    try:
+        fetch_limit = 500
+        
+        if search:
+            raw_markets = app.state.gamma_client.search_markets(search, limit=fetch_limit)
+        else:
+            raw_markets = app.state.gamma_client.get_current_markets(limit=fetch_limit)
+        
+        parsed = [parse_market(m) for m in raw_markets]
+        
+        # Filter out expired markets
+        now = datetime.now().isoformat()
+        active_markets = [m for m in parsed if not m.end_date or m.end_date > now]
+        
+        # Filter by liquidity
+        active_markets = [m for m in active_markets if m.liquidity >= min_liquidity]
+        
+        # Filter out extreme prices (effectively resolved)
+        active_markets = [m for m in active_markets if 0.05 <= m.yes_price <= 0.95]
+        
+        # Filter by category if specified
+        if category and category != "all":
+            active_markets = [m for m in active_markets if market_matches_categories(m.question, [category])]
+        
+        # Sort by volume (most active first)
+        active_markets.sort(key=lambda x: x.volume, reverse=True)
+        
+        # Limit results
+        paginated = active_markets[:limit]
+        
+        return {
+            "markets": [
+                {
+                    "id": m.id,
+                    "question": m.question,
+                    "volume": m.volume,
+                    "liquidity": m.liquidity,
+                    "yes_price": m.yes_price,
+                    "volume_24h": m.volume_24h
+                }
+                for m in paginated
+            ],
+            "total": len(active_markets),
+            "showing": len(paginated)
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -1304,22 +1304,6 @@ async def get_markets(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/markets/{market_id}")
-async def get_market(market_id: str):
-    """Get a specific market by ID"""
-    try:
-        # For now, search in current markets
-        markets = app.state.gamma_client.get_current_markets(limit=100)
-        for m in markets:
-            if m.get("condition_id") == market_id or m.get("id") == market_id:
-                return parse_market(m)
-        raise HTTPException(status_code=404, detail="Market not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/api/markets/selectable")
 async def get_selectable_markets(
     limit: int = 100,
@@ -1377,6 +1361,22 @@ async def get_selectable_markets(
             "total": len(active_markets),
             "showing": len(paginated)
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/markets/{market_id}")
+async def get_market(market_id: str):
+    """Get a specific market by ID"""
+    try:
+        # For now, search in current markets
+        markets = app.state.gamma_client.get_current_markets(limit=100)
+        for m in markets:
+            if m.get("condition_id") == market_id or m.get("id") == market_id:
+                return parse_market(m)
+        raise HTTPException(status_code=404, detail="Market not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

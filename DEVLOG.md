@@ -13,8 +13,7 @@
 ### 🟡 Up Next (Priority)
 - [ ] Backtesting framework
 - [ ] Risk analytics dashboard
-- [ ] News API integration (for market context)
-- [ ] RAG-based market search (like official Polymarket agents)
+- [ ] Order book visualization
 
 ### 🟢 Backlog
 - [ ] More trading strategies
@@ -31,6 +30,42 @@
 ---
 
 ## ✅ Completed Work
+
+### Phase 8: Polymarket Agents Framework Integration (Jan 1, 2026) ✅
+**Based on analysis of official Polymarket/agents repository**
+
+#### Events View
+- [x] **Events endpoint** - GET /api/events with grouped markets
+- [x] **EventList component** - Expandable event cards showing all related markets
+- [x] **View toggle** - Switch between Markets and Events views
+- [x] **Event sorting** - Sort by volume, liquidity, or end date
+
+#### Enhanced Market Data
+- [x] **24h volume** - Display recent trading activity
+- [x] **Spread calculation** - Price deviation from 50/50
+- [x] **Event metadata** - event_id, event_slug for grouping
+- [x] **Market descriptions** - Full descriptions and images
+- [x] **Sort controls** - Frontend sort dropdown
+
+#### Data Connectors (src/connectors/)
+- [x] **NewsAPI** - Fetch relevant news articles for market context
+- [x] **Tavily Search** - AI-powered web search for predictions
+- [x] **DuckDuckGo** - Fallback search (no API key needed)
+- [x] **ChromaDB RAG** - Semantic market search with embeddings
+- [x] **SimpleRAG** - Lightweight in-memory alternative
+
+#### Enhanced Superforecaster
+- [x] **News context** - Inject relevant news into prompts
+- [x] **Search context** - Web search results for better predictions
+- [x] **Quick analysis** - Fast probability estimation for scanning
+- [x] **Odds-aware** - Compare predictions to market prices for edge
+
+#### New API Endpoints (5 new, 22 total)
+- [x] GET /api/events - List events with grouped markets
+- [x] GET /api/events/{id} - Get specific event details
+- [x] GET /api/news - Search news articles
+- [x] GET /api/news/market/{id} - News for specific market
+- [x] GET /api/search - Web search (Tavily/DuckDuckGo)
 
 ### Phase 7: Dashboard Improvements (Jan 1, 2026) ✅
 - [x] **Fixed expired markets** - Filter out markets with past end dates

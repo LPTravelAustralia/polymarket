@@ -1,7 +1,72 @@
 # Polymarket Trading Bot - Development Log
 
 > **Purpose:** Track all development progress, decisions, and tasks across sessions.  
-> **Last Updated:** January 1, 2026
+> **Last Updated:** January 2, 2026
+
+---
+
+## 🖥️ Production Server Setup
+
+### Server Details
+- **Host:** Google Cloud VM (`polymarket-bot`)
+- **User:** `hello`
+- **SSH:** `ssh.cloud.google.com` (SSH-in-browser)
+- **Backend Path:** `/home/hello/polymarket/backend`
+- **Virtual Env:** `/home/hello/polymarket/.venv`
+- **Port:** 8000
+
+### Architecture
+```
+┌─────────────────┐     ┌─────────────────┐
+│   Netlify       │────▶│  Google Cloud   │
+│   (Frontend)    │     │  VM (Backend)   │
+│   Auto-deploy   │     │  Port 8000      │
+└─────────────────┘     └─────────────────┘
+        │                       │
+        ▼                       ▼
+   GitHub repo            uvicorn + FastAPI
+   (auto builds)          (manual restart)
+```
+
+### Commands Reference
+
+**SSH into server:**
+```bash
+# Via Google Cloud Console SSH-in-browser
+# Or: gcloud compute ssh polymarket-bot --zone=us-central1-a
+```
+
+**Pull latest code:**
+```bash
+cd ~/polymarket && git pull origin copilot/build-polymarket-trading-bot
+```
+
+**Restart backend:**
+```bash
+# Find and kill old process
+ps aux | grep uvicorn
+kill <PID>
+
+# Start new process
+cd ~/polymarket && source .venv/bin/activate && cd backend && pip install -r requirements.txt && nohup uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 > /tmp/backend.log 2>&1 &
+```
+
+**One-liner restart:**
+```bash
+pkill -f uvicorn; cd ~/polymarket && source .venv/bin/activate && cd backend && pip install -r requirements.txt && nohup uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 > /tmp/backend.log 2>&1 &
+```
+
+**Check status:**
+```bash
+ps aux | grep uvicorn
+curl http://localhost:8000/
+curl http://localhost:8000/api/markets?limit=2
+```
+
+**View logs:**
+```bash
+tail -f /tmp/backend.log
+```
 
 ---
 
@@ -14,6 +79,7 @@
 - [ ] Backtesting framework
 - [ ] Risk analytics dashboard
 - [ ] Order book visualization
+- [ ] Live trading integration (connect real wallet)
 
 ### 🟢 Backlog
 - [ ] More trading strategies
@@ -22,6 +88,7 @@
 - [ ] Mobile notifications
 - [ ] Portfolio optimization
 - [ ] Social trading features
+- [ ] Systemd service for auto-restart on reboot
 
 ### ⚪ Technical Debt
 - [ ] Implement actual USDC transfer in `fee_collector.py` (currently placeholder)
@@ -31,7 +98,7 @@
 
 ## ✅ Completed Work
 
-### Phase 8: Polymarket Agents Framework Integration (Jan 1, 2026) ✅
+### Phase 8: Polymarket Agents Framework Integration (Jan 1-2, 2026) ✅
 **Based on analysis of official Polymarket/agents repository**
 
 #### Events View

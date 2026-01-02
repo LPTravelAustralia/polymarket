@@ -1,7 +1,7 @@
 'use client'
 
 import { Market, formatCurrency, formatPercent } from '@/lib/api'
-import { Search, RefreshCw, TrendingUp, DollarSign, Calendar } from 'lucide-react'
+import { Search, RefreshCw, TrendingUp, DollarSign, Calendar, Activity, BarChart3 } from 'lucide-react'
 
 interface MarketListProps {
   markets: Market[]
@@ -11,6 +11,8 @@ interface MarketListProps {
   category: string
   onCategoryChange: (category: string) => void
   onMarketClick: (market: Market) => void
+  sortBy?: string
+  onSortChange?: (sort: string) => void
 }
 
 const categories = [
@@ -21,6 +23,12 @@ const categories = [
   { id: 'finance', label: 'Finance' },
 ]
 
+const sortOptions = [
+  { id: 'volume', label: 'Volume' },
+  { id: 'liquidity', label: 'Liquidity' },
+  { id: 'end_date', label: 'End Date' },
+]
+
 export function MarketList({
   markets,
   isLoading,
@@ -29,6 +37,8 @@ export function MarketList({
   category,
   onCategoryChange,
   onMarketClick,
+  sortBy = 'volume',
+  onSortChange,
 }: MarketListProps) {
   return (
     <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
@@ -57,21 +67,40 @@ export function MarketList({
         </button>
       </div>
 
-      {/* Category Filters */}
-      <div className="flex gap-2 mb-6 flex-wrap">
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => onCategoryChange(cat.id)}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-              category === cat.id
-                ? 'bg-primary-500 text-black'
-                : 'bg-white/10 text-gray-300 hover:bg-white/20'
-            }`}
-          >
-            {cat.label}
-          </button>
-        ))}
+      {/* Category & Sort Filters */}
+      <div className="flex gap-4 mb-6 flex-wrap items-center">
+        <div className="flex gap-2 flex-wrap">
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => onCategoryChange(cat.id)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                category === cat.id
+                  ? 'bg-primary-500 text-black'
+                  : 'bg-white/10 text-gray-300 hover:bg-white/20'
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+        
+        {onSortChange && (
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-sm text-gray-400">Sort:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => onSortChange(e.target.value)}
+              className="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500"
+            >
+              {sortOptions.map((opt) => (
+                <option key={opt.id} value={opt.id} className="bg-gray-900">
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Market List */}
@@ -115,6 +144,7 @@ function MarketCard({
   onClick: () => void 
 }) {
   const yesPercent = Math.round(market.yes_price * 100)
+  const hasVolume24h = market.volume_24h && market.volume_24h > 0
 
   return (
     <div
@@ -131,7 +161,7 @@ function MarketCard({
         </span>
       </div>
 
-      <div className="flex gap-5 text-sm text-gray-400 mb-3">
+      <div className="flex gap-4 text-sm text-gray-400 mb-3 flex-wrap">
         <span className="flex items-center gap-1.5">
           <DollarSign className="w-4 h-4" />
           {formatCurrency(market.liquidity)}
@@ -140,6 +170,12 @@ function MarketCard({
           <TrendingUp className="w-4 h-4" />
           {formatCurrency(market.volume)}
         </span>
+        {hasVolume24h && (
+          <span className="flex items-center gap-1.5 text-primary-400">
+            <BarChart3 className="w-4 h-4" />
+            {formatCurrency(market.volume_24h!)} 24h
+          </span>
+        )}
         {market.end_date && (
           <span className="flex items-center gap-1.5">
             <Calendar className="w-4 h-4" />

@@ -15,6 +15,16 @@ from src.core.config import Config
 logger = logging.getLogger(__name__)
 
 
+# Try to import connectors (optional)
+try:
+    from src.connectors.news import NewsConnector
+    from src.connectors.search import TavilySearchConnector, DuckDuckGoSearchConnector
+    CONNECTORS_AVAILABLE = True
+except ImportError:
+    CONNECTORS_AVAILABLE = False
+    logger.warning("Connectors not available")
+
+
 class SuperforecasterPrompts:
     """Prompt templates based on official Polymarket agents framework"""
     
@@ -22,12 +32,20 @@ class SuperforecasterPrompts:
     def superforecaster_analysis(
         question: str,
         description: str,
-        outcomes: List[str]
+        outcomes: List[str],
+        news_context: Optional[str] = None,
+        search_context: Optional[str] = None
     ) -> str:
         """
         Generate superforecaster analysis prompt
-        Uses Tetlock's 5-step methodology
+        Uses Tetlock's 5-step methodology with optional news/search context
         """
+        context_section = ""
+        if news_context:
+            context_section += f"\n**RECENT NEWS:**\n{news_context}\n"
+        if search_context:
+            context_section += f"\n**WEB SEARCH RESULTS:**\n{search_context}\n"
+        
         return f"""
 You are a Superforecaster tasked with correctly predicting the likelihood of events.
 Use the following systematic process to develop an accurate prediction:
@@ -35,7 +53,7 @@ Use the following systematic process to develop an accurate prediction:
 **QUESTION:** {question}
 **DESCRIPTION:** {description}
 **POSSIBLE OUTCOMES:** {', '.join(outcomes)}
-
+{context_section}
 Follow these key steps in your analysis:
 
 1. **Breaking Down the Question:**
@@ -66,6 +84,83 @@ Follow these key steps in your analysis:
 **OUTPUT FORMAT:**
 Provide your analysis, then conclude with:
 "PREDICTION: [OUTCOME] with probability [0.XX]"
+"""
+    
+    @staticmethod
+    def superforecaster_with_odds(
+        question: str,
+        description: str,
+        outcomes: List[str],
+        current_odds: List[float],
+        news_context: Optional[str] = None
+    ) -> str:
+        """
+        Enhanced prompt that includes current market odds for edge calculation
+        """
+        odds_str = ", ".join([f"{o}: {p:.0%}" for o, p in zip(outcomes, current_odds)])
+        context = f"\n**RECENT NEWS:**\n{news_context}\n" if news_context else ""
+        
+        return f"""
+You are a Superforecaster analyzing prediction markets to find mispricings.
+
+**QUESTION:** {question}
+**DESCRIPTION:** {description}
+**OUTCOMES:** {', '.join(outcomes)}
+**CURRENT MARKET ODDS:** {odds_str}
+{context}
+Your task is to:
+1. Analyze the question using Tetlock's superforecasting methodology
+2. Determine your own probability estimate for each outcome
+3. Compare to market prices to identify edge
+
+**ANALYSIS FRAMEWORK:**
+
+1. **Outside View (Base Rates)**
+   - What's the historical frequency of similar events?
+   - What do prediction markets/polls typically say?
+   
+2. **Inside View (Specific Factors)**
+   - What unique factors affect this specific situation?
+   - What recent developments are relevant?
+   
+3. **Synthesis**
+   - Weight outside and inside views appropriately
+   - Adjust for known biases
+   
+4. **Calibration Check**
+   - Are you overconfident? Underconfident?
+   - Does your probability feel right given uncertainty?
+
+**OUTPUT FORMAT:**
+ANALYSIS: [Your detailed reasoning]
+PREDICTED_PROBABILITY: [0.XX for first outcome]
+MARKET_PRICE: [Current market price]
+EDGE: [Your probability - Market price, as percentage]
+CONFIDENCE: [LOW/MEDIUM/HIGH]
+RECOMMENDATION: [BUY_YES/BUY_NO/HOLD]
+"""
+    
+    @staticmethod
+    def quick_probability_estimate(
+        question: str,
+        current_yes_price: float = 0.5
+    ) -> str:
+        """Quick probability estimate for fast scanning"""
+        return f"""
+You are a Superforecaster. Quickly estimate the probability for this prediction market:
+
+QUESTION: {question}
+CURRENT MARKET PRICE: {current_yes_price:.0%} YES
+
+Consider:
+1. Base rates for similar events
+2. Recent relevant news
+3. Key factors
+
+Respond with ONLY:
+PROBABILITY: [0.XX]
+CONFIDENCE: [LOW/MEDIUM/HIGH]
+BRIEF_REASON: [One sentence]
 """
     
     @staticmethod
@@ -159,16 +254,20 @@ class SuperforecasterAgent:
     for prediction market analysis and trading
     """
     
-    def __init__(self, config: Config, model: str = "gpt-4"):
+    def __init__(self, config: Config, model: str = "gpt-4", use_news: bool = True, use_search: bool = True):
         """
         Initialize Superforecaster agent
         
         Args:
             config: Configuration object
             model: OpenAI model to use
+            use_news: Whether to fetch news context
+            use_search: Whether to use web search
         """
         self.config = config
         self.prompts = SuperforecasterPrompts()
+        self.use_news = use_news
+        self.use_search = use_search
         
         # Initialize LLM
         if config.openai_api_key:
@@ -180,6 +279,38 @@ class SuperforecasterAgent:
         else:
             self.llm = None
             logger.warning("No OpenAI API key - AI predictions disabled")
+        
+        # Initialize connectors
+        self.news_connector = None
+        self.search_connector = None
+        
+        if CONNECTORS_AVAILABLE:
+            if use_news:
+                self.news_connector = NewsConnector()
+            if use_search:
+                self.search_connector = TavilySearchConnector()
+    
+    def _get_news_context(self, question: str) -> Optional[str]:
+        """Get relevant news articles for market"""
+        if not self.news_connector:
+            return None
+        
+        try:
+            return self.news_connector.get_market_context(question, limit=3)
+        except Exception as e:
+            logger.warning(f"Failed to get news context: {e}")
+            return None
+    
+    def _get_search_context(self, question: str) -> Optional[str]:
+        """Get web search context for market"""
+        if not self.search_connector:
+            return None
+        
+        try:
+            return self.search_connector.get_market_context(question, max_results=3)
+        except Exception as e:
+            logger.warning(f"Failed to get search context: {e}")
+            return None
     
     def analyze_market(
         self,
@@ -208,9 +339,15 @@ class SuperforecasterAgent:
             }
         
         try:
+            # Get external context
+            news_context = self._get_news_context(question) if self.use_news else None
+            search_context = self._get_search_context(question) if self.use_search else None
+            
             # Step 1: Superforecaster analysis
             analysis_prompt = self.prompts.superforecaster_analysis(
-                question, description, outcomes
+                question, description, outcomes,
+                news_context=news_context,
+                search_context=search_context
             )
             
             messages = [
@@ -230,6 +367,8 @@ class SuperforecasterAgent:
                 "current_prices": current_prices,
                 "analysis": analysis,
                 "prediction": prediction,
+                "news_context": news_context,
+                "search_context": search_context,
                 "timestamp": datetime.now().isoformat()
             }
             
@@ -239,6 +378,70 @@ class SuperforecasterAgent:
                 "error": str(e),
                 "prediction": None
             }
+    
+    def quick_analyze(
+        self,
+        question: str,
+        current_yes_price: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Quick probability estimate for fast market scanning
+        
+        Args:
+            question: Market question
+            current_yes_price: Current YES price
+            
+        Returns:
+            Quick analysis with probability and edge
+        """
+        if not self.llm:
+            return {"error": "AI not available"}
+        
+        try:
+            prompt = self.prompts.quick_probability_estimate(question, current_yes_price)
+            
+            messages = [
+                SystemMessage(content="You are a Superforecaster. Be concise."),
+                HumanMessage(content=prompt)
+            ]
+            
+            response = self.llm.invoke(messages)
+            result = self._parse_quick_estimate(response.content)
+            
+            # Calculate edge
+            if result.get("probability"):
+                result["edge"] = result["probability"] - current_yes_price
+                result["recommendation"] = (
+                    "BUY_YES" if result["edge"] > 0.05 else
+                    "BUY_NO" if result["edge"] < -0.05 else
+                    "HOLD"
+                )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Quick analysis error: {e}")
+            return {"error": str(e)}
+    
+    def _parse_quick_estimate(self, text: str) -> Dict[str, Any]:
+        """Parse quick estimate response"""
+        import re
+        
+        result = {"raw_response": text}
+        
+        prob_match = re.search(r"PROBABILITY:\s*(\d*\.?\d+)", text, re.IGNORECASE)
+        if prob_match:
+            result["probability"] = float(prob_match.group(1))
+        
+        conf_match = re.search(r"CONFIDENCE:\s*(LOW|MEDIUM|HIGH)", text, re.IGNORECASE)
+        if conf_match:
+            result["confidence"] = conf_match.group(1).upper()
+        
+        reason_match = re.search(r"BRIEF_REASON:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+        if reason_match:
+            result["reason"] = reason_match.group(1).strip()
+        
+        return result
     
     def get_trade_recommendation(
         self,

@@ -6,11 +6,37 @@ export interface Market {
   question: string
   liquidity: number
   volume: number
+  volume_24h?: number
   yes_price: number
   no_price: number
+  spread?: number
   end_date?: string
   category?: string
   slug?: string
+  closed?: boolean
+  resolved_outcome?: string
+  event_id?: string
+  event_slug?: string
+  description?: string
+  image?: string
+}
+
+export interface Event {
+  id: string
+  title: string
+  slug?: string
+  description?: string
+  image?: string
+  end_date?: string
+  markets: Market[]
+  total_volume: number
+  total_liquidity: number
+}
+
+export interface EventsResponse {
+  events: Event[]
+  total: number
+  showing: number
 }
 
 export interface BotStatus {
@@ -142,6 +168,27 @@ export const api = {
     
     const query = searchParams.toString()
     return fetchAPI(`/api/markets${query ? `?${query}` : ''}`)
+  },
+
+  // Events (grouped markets)
+  getEvents: async (params?: {
+    search?: string
+    limit?: number
+    offset?: number
+    sortBy?: string
+  }): Promise<EventsResponse> => {
+    const searchParams = new URLSearchParams()
+    if (params?.search) searchParams.set('search', params.search)
+    if (params?.limit) searchParams.set('limit', params.limit.toString())
+    if (params?.offset) searchParams.set('offset', params.offset.toString())
+    if (params?.sortBy) searchParams.set('sort_by', params.sortBy)
+    
+    const query = searchParams.toString()
+    return fetchAPI(`/api/events${query ? `?${query}` : ''}`)
+  },
+
+  getEvent: async (id: string): Promise<Event> => {
+    return fetchAPI(`/api/events/${id}`)
   },
 
   getMarket: async (id: string): Promise<Market> => {

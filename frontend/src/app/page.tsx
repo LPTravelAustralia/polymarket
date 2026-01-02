@@ -5,10 +5,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Header } from '@/components/Header'
 import { StatsRow } from '@/components/StatsRow'
 import { MarketList } from '@/components/MarketList'
+import { EventList } from '@/components/EventList'
 import { Sidebar } from '@/components/Sidebar'
 import { MarketModal } from '@/components/MarketModal'
 import { SettingsPanel } from '@/components/SettingsPanel'
-import { api, Market, BotStatus, Portfolio, BotConfig, MarketsResponse } from '@/lib/api'
+import { api, Market, BotStatus, Portfolio, BotConfig, MarketsResponse, EventsResponse } from '@/lib/api'
 
 const DEFAULT_SETTINGS: BotConfig = {
   trade_size: 25,
@@ -51,6 +52,8 @@ export default function Home() {
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [category, setCategory] = useState('all')
+  const [sortBy, setSortBy] = useState('volume')
+  const [viewMode, setViewMode] = useState<'markets' | 'events'>('markets')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [botSettings, setBotSettings] = useState<BotConfig>(DEFAULT_SETTINGS)
   const [wsConnected, setWsConnected] = useState(false)
@@ -148,8 +151,16 @@ export default function Home() {
 
   // Fetch markets
   const { data: marketsData, isLoading: marketsLoading } = useQuery({
-    queryKey: ['markets', searchQuery, category],
-    queryFn: () => api.getMarkets({ search: searchQuery, category, limit: 50, sortBy: 'volume' }),
+    queryKey: ['markets', searchQuery, category, sortBy],
+    queryFn: () => api.getMarkets({ search: searchQuery, category, limit: 50, sortBy }),
+    enabled: viewMode === 'markets',
+  })
+
+  // Fetch events
+  const { data: eventsData, isLoading: eventsLoading } = useQuery({
+    queryKey: ['events', searchQuery, sortBy],
+    queryFn: () => api.getEvents({ search: searchQuery, limit: 20, sortBy }),
+    enabled: viewMode === 'events',
   })
 
   // Fetch bot status - with WebSocket, we can poll less frequently
@@ -222,17 +233,55 @@ export default function Home() {
           status={status}
         />
 
+        {/* View Toggle */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setViewMode('markets')}
+            className={`px-6 py-2.5 rounded-xl font-medium transition-colors ${
+              viewMode === 'markets'
+                ? 'bg-primary-500 text-black'
+                : 'bg-white/10 text-gray-300 hover:bg-white/20'
+            }`}
+          >
+            📊 Markets
+          </button>
+          <button
+            onClick={() => setViewMode('events')}
+            className={`px-6 py-2.5 rounded-xl font-medium transition-colors ${
+              viewMode === 'events'
+                ? 'bg-primary-500 text-black'
+                : 'bg-white/10 text-gray-300 hover:bg-white/20'
+            }`}
+          >
+            🎯 Events
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <div className="lg:col-span-3">
-            <MarketList
-              markets={marketsData?.markets ?? []}
-              isLoading={marketsLoading}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              category={category}
-              onCategoryChange={setCategory}
-              onMarketClick={handleAnalyze}
-            />
+            {viewMode === 'markets' ? (
+              <MarketList
+                markets={marketsData?.markets ?? []}
+                isLoading={marketsLoading}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                category={category}
+                onCategoryChange={setCategory}
+                onMarketClick={handleAnalyze}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+              />
+            ) : (
+              <EventList
+                events={eventsData?.events ?? []}
+                isLoading={eventsLoading}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onMarketClick={handleAnalyze}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+              />
+            )}
           </div>
 
           <div className="lg:col-span-1">

@@ -288,13 +288,19 @@ class MarketResponse(BaseModel):
     question: str
     liquidity: float
     volume: float
+    volume_24h: float = 0.0
     yes_price: float
     no_price: float
+    spread: float = 0.0  # Difference between best bid and ask
     end_date: Optional[str] = None
     category: Optional[str] = None
     slug: Optional[str] = None
     closed: bool = False
     resolved_outcome: Optional[str] = None  # "yes", "no", or None if not resolved
+    event_id: Optional[str] = None
+    event_slug: Optional[str] = None
+    description: Optional[str] = None
+    image: Optional[str] = None
 
 
 class BotStatus(BaseModel):
@@ -431,6 +437,12 @@ def parse_market(m: dict) -> MarketResponse:
     except:
         pass
     
+    # Calculate spread (difference from 50/50)
+    spread = abs(yes_price - 0.5) * 2  # 0 = 50/50, 1 = certain
+    
+    # Parse 24h volume if available
+    volume_24h = float(m.get("volume24hr", 0) or 0)
+    
     # Check if market is closed/resolved
     is_closed = m.get("closed", False)
     resolved_outcome = None
@@ -446,13 +458,19 @@ def parse_market(m: dict) -> MarketResponse:
         question=m.get("question", "Unknown"),
         liquidity=float(m.get("liquidity", 0)),
         volume=float(m.get("volume", 0)),
+        volume_24h=volume_24h,
         yes_price=yes_price,
         no_price=no_price,
+        spread=round(spread, 4),
         end_date=m.get("end_date_iso"),
         category=m.get("category"),
         slug=m.get("slug"),
         closed=is_closed,
-        resolved_outcome=resolved_outcome
+        resolved_outcome=resolved_outcome,
+        event_id=m.get("event_id") or m.get("eventId"),
+        event_slug=m.get("event_slug") or m.get("eventSlug"),
+        description=m.get("description"),
+        image=m.get("image")
     )
 
 
@@ -945,6 +963,147 @@ async def get_market(market_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class EventResponse(BaseModel):
+    """Event with grouped markets"""
+    id: str
+    title: str
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    image: Optional[str] = None
+    end_date: Optional[str] = None
+    markets: List[MarketResponse] = []
+    total_volume: float = 0.0
+    total_liquidity: float = 0.0
+
+
+class EventsResponse(BaseModel):
+    """Response for events endpoint"""
+    events: List[EventResponse]
+    total: int
+    showing: int
+
+
+@app.get("/api/events")
+async def get_events(
+    limit: int = 20,
+    offset: int = 0,
+    search: Optional[str] = None,
+    sort_by: str = "volume"  # volume, liquidity, end_date
+):
+    """Get events with grouped markets"""
+    try:
+        # Fetch events from Gamma API
+        raw_events = app.state.gamma_client.get_current_events(limit=200)
+        
+        # Also fetch all markets to group them
+        raw_markets = app.state.gamma_client.get_current_markets(limit=500)
+        
+        # Build market lookup by event_id
+        markets_by_event: Dict[str, List] = {}
+        for m in raw_markets:
+            event_id = m.get("event_id") or m.get("eventId") or ""
+            if event_id:
+                if event_id not in markets_by_event:
+                    markets_by_event[event_id] = []
+                markets_by_event[event_id].append(m)
+        
+        # Filter out expired events
+        now = datetime.now().isoformat()
+        
+        events = []
+        for e in raw_events:
+            event_id = str(e.get("id", ""))
+            end_date = e.get("end_date_iso") or e.get("endDate")
+            
+            # Skip expired events
+            if end_date and end_date < now:
+                continue
+            
+            # Skip if search doesn't match
+            if search:
+                title = e.get("title", "").lower()
+                desc = (e.get("description") or "").lower()
+                if search.lower() not in title and search.lower() not in desc:
+                    continue
+            
+            # Get markets for this event
+            event_markets = markets_by_event.get(event_id, [])
+            parsed_markets = [parse_market(m) for m in event_markets]
+            
+            # Filter out expired markets
+            parsed_markets = [m for m in parsed_markets if not m.end_date or m.end_date > now]
+            
+            total_volume = sum(m.volume for m in parsed_markets)
+            total_liquidity = sum(m.liquidity for m in parsed_markets)
+            
+            events.append(EventResponse(
+                id=event_id,
+                title=e.get("title", "Unknown Event"),
+                slug=e.get("slug"),
+                description=e.get("description"),
+                image=e.get("image"),
+                end_date=end_date,
+                markets=parsed_markets,
+                total_volume=total_volume,
+                total_liquidity=total_liquidity
+            ))
+        
+        # Sort events
+        if sort_by == "volume":
+            events.sort(key=lambda x: x.total_volume, reverse=True)
+        elif sort_by == "liquidity":
+            events.sort(key=lambda x: x.total_liquidity, reverse=True)
+        elif sort_by == "end_date":
+            events.sort(key=lambda x: x.end_date or "9999")
+        
+        total = len(events)
+        paginated = events[offset:offset + limit]
+        
+        return EventsResponse(
+            events=paginated,
+            total=total,
+            showing=len(paginated)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/events/{event_id}")
+async def get_event(event_id: str):
+    """Get a specific event with its markets"""
+    try:
+        # Fetch the event
+        event = app.state.gamma_client.get_event(int(event_id))
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        # Fetch markets for this event
+        raw_markets = app.state.gamma_client.get_current_markets(limit=500)
+        event_markets = [
+            parse_market(m) for m in raw_markets
+            if (m.get("event_id") or m.get("eventId") or "") == event_id
+        ]
+        
+        now = datetime.now().isoformat()
+        event_markets = [m for m in event_markets if not m.end_date or m.end_date > now]
+        
+        return EventResponse(
+            id=event_id,
+            title=event.get("title", "Unknown Event"),
+            slug=event.get("slug"),
+            description=event.get("description"),
+            image=event.get("image"),
+            end_date=event.get("end_date_iso"),
+            markets=event_markets,
+            total_volume=sum(m.volume for m in event_markets),
+            total_liquidity=sum(m.liquidity for m in event_markets)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/status", response_model=BotStatus)
 async def get_status():
     """Get bot status"""
@@ -956,6 +1115,151 @@ async def get_status():
         active_positions=app.state.bot_stats["active_positions"],
         last_update=datetime.now().isoformat()
     )
+
+
+# ============================================================================
+# News & Search Endpoints
+# ============================================================================
+
+class NewsArticle(BaseModel):
+    title: str
+    description: Optional[str] = None
+    url: str
+    source: str
+    published_at: str
+
+
+class NewsResponse(BaseModel):
+    articles: List[NewsArticle]
+    query: str
+
+
+class SearchResultItem(BaseModel):
+    title: str
+    url: str
+    content: str
+    score: float = 0.0
+
+
+class SearchResponse(BaseModel):
+    results: List[SearchResultItem]
+    query: str
+
+
+@app.get("/api/news")
+async def get_news(query: str, limit: int = 10):
+    """
+    Get news articles relevant to a search query.
+    Requires NEWSAPI_KEY environment variable.
+    """
+    try:
+        from src.connectors.news import NewsConnector
+        
+        connector = NewsConnector()
+        articles = connector.search(query, limit=limit)
+        
+        return NewsResponse(
+            articles=[
+                NewsArticle(
+                    title=a.title,
+                    description=a.description,
+                    url=a.url,
+                    source=a.source,
+                    published_at=a.published_at
+                )
+                for a in articles
+            ],
+            query=query
+        )
+    except ImportError:
+        raise HTTPException(status_code=501, detail="News connector not available")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/news/market/{market_id}")
+async def get_market_news(market_id: str, limit: int = 5):
+    """Get news articles relevant to a specific market"""
+    try:
+        from src.connectors.news import NewsConnector
+        
+        # Get the market
+        markets = app.state.gamma_client.get_current_markets(limit=500)
+        market = None
+        for m in markets:
+            if m.get("condition_id") == market_id or str(m.get("id")) == market_id:
+                market = m
+                break
+        
+        if not market:
+            raise HTTPException(status_code=404, detail="Market not found")
+        
+        connector = NewsConnector()
+        context = connector.get_market_context(
+            market.get("question", ""),
+            market.get("description"),
+            limit=limit
+        )
+        
+        articles = connector.search(market.get("question", ""), limit=limit)
+        
+        return {
+            "market_id": market_id,
+            "question": market.get("question"),
+            "context": context,
+            "articles": [
+                {
+                    "title": a.title,
+                    "description": a.description,
+                    "url": a.url,
+                    "source": a.source,
+                    "published_at": a.published_at
+                }
+                for a in articles
+            ]
+        }
+    except ImportError:
+        raise HTTPException(status_code=501, detail="News connector not available")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/search")
+async def web_search(query: str, limit: int = 5):
+    """
+    Web search using Tavily or DuckDuckGo.
+    Tavily requires TAVILY_API_KEY environment variable.
+    """
+    try:
+        from src.connectors.search import TavilySearchConnector, DuckDuckGoSearchConnector
+        
+        # Try Tavily first (better quality)
+        tavily = TavilySearchConnector()
+        if tavily.api_key:
+            results = tavily.search(query, max_results=limit)
+        else:
+            # Fallback to DuckDuckGo
+            ddg = DuckDuckGoSearchConnector()
+            results = ddg.search(query, max_results=limit)
+        
+        return SearchResponse(
+            results=[
+                SearchResultItem(
+                    title=r.title,
+                    url=r.url,
+                    content=r.content,
+                    score=r.score
+                )
+                for r in results
+            ],
+            query=query
+        )
+    except ImportError:
+        raise HTTPException(status_code=501, detail="Search connector not available")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/activity")

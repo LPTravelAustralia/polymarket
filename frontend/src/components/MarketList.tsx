@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { Market, formatCurrency, formatPercent } from '@/lib/api'
-import { Search, RefreshCw, TrendingUp, DollarSign, Calendar, Activity, BarChart3 } from 'lucide-react'
+import { Search, RefreshCw, TrendingUp, DollarSign, Calendar, Activity, BarChart3, Loader2 } from 'lucide-react'
 
 interface MarketListProps {
   markets: Market[]
@@ -13,6 +14,8 @@ interface MarketListProps {
   onMarketClick: (market: Market) => void
   sortBy?: string
   onSortChange?: (sort: string) => void
+  onQuickTrade?: (marketId: string, side: 'yes' | 'no') => Promise<void>
+  existingPositions?: Set<string>
 }
 
 const categories = [
@@ -39,7 +42,27 @@ export function MarketList({
   onMarketClick,
   sortBy = 'volume',
   onSortChange,
+  onQuickTrade,
+  existingPositions,
 }: MarketListProps) {
+  const [tradingMarkets, setTradingMarkets] = useState<Set<string>>(new Set())
+
+  const handleQuickTrade = async (e: React.MouseEvent, marketId: string, side: 'yes' | 'no') => {
+    e.stopPropagation()
+    if (!onQuickTrade) return
+    
+    setTradingMarkets(prev => new Set(prev).add(marketId))
+    try {
+      await onQuickTrade(marketId, side)
+    } finally {
+      setTradingMarkets(prev => {
+        const next = new Set(prev)
+        next.delete(marketId)
+        return next
+      })
+    }
+  }
+
   return (
     <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
@@ -126,6 +149,9 @@ export function MarketList({
               market={market}
               index={index}
               onClick={() => onMarketClick(market)}
+              onQuickTrade={onQuickTrade ? (side) => handleQuickTrade({ stopPropagation: () => {} } as React.MouseEvent, market.id, side) : undefined}
+              isTrading={tradingMarkets.has(market.id)}
+              hasPosition={existingPositions?.has(market.id)}
             />
           ))
         )}
@@ -137,11 +163,17 @@ export function MarketList({
 function MarketCard({ 
   market, 
   index, 
-  onClick 
+  onClick,
+  onQuickTrade,
+  isTrading,
+  hasPosition
 }: { 
   market: Market
   index: number
-  onClick: () => void 
+  onClick: () => void
+  onQuickTrade?: (side: 'yes' | 'no') => void
+  isTrading?: boolean
+  hasPosition?: boolean
 }) {
   const yesPercent = Math.round(market.yes_price * 100)
   const hasVolume24h = market.volume_24h && market.volume_24h > 0
@@ -188,12 +220,49 @@ function MarketCard({
       </div>
 
       {/* Probability bar */}
-      <div className="h-2 bg-red-500/30 rounded-full overflow-hidden">
+      <div className="h-2 bg-red-500/30 rounded-full overflow-hidden mb-3">
         <div
           className="h-full bg-gradient-to-r from-primary-500 to-primary-400 transition-all duration-500"
           style={{ width: `${yesPercent}%` }}
         />
       </div>
+
+      {/* Quick Trade Buttons */}
+      {onQuickTrade && (
+        <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          {hasPosition ? (
+            <span className="flex-1 text-center py-2 bg-white/5 rounded-lg text-xs text-gray-500">
+              Already have position
+            </span>
+          ) : isTrading ? (
+            <span className="flex-1 flex items-center justify-center py-2 bg-white/10 rounded-lg text-xs text-gray-400">
+              <Loader2 className="w-3 h-3 animate-spin mr-2" />
+              Opening...
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onQuickTrade('yes')
+                }}
+                className="flex-1 py-2 bg-green-500/20 hover:bg-green-500/40 text-green-400 text-xs font-semibold rounded-lg transition-colors"
+              >
+                Buy YES
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onQuickTrade('no')
+                }}
+                className="flex-1 py-2 bg-red-500/20 hover:bg-red-500/40 text-red-400 text-xs font-semibold rounded-lg transition-colors"
+              >
+                Buy NO
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

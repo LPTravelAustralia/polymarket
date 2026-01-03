@@ -1,8 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import { BotStatus, Portfolio, formatCurrency } from '@/lib/api'
 import { PnLChart } from './PnLChart'
-import { Play, Square, Activity, TrendingUp, Target, Clock, Wallet, Settings } from 'lucide-react'
+import { Play, Square, Activity, TrendingUp, Target, Clock, Wallet, Settings, X, Loader2 } from 'lucide-react'
 
 interface EquityPoint {
   timestamp: string
@@ -21,6 +22,7 @@ interface SidebarProps {
   isStarting: boolean
   isStopping: boolean
   onOpenSettings?: () => void
+  onClosePosition?: (marketId: string) => Promise<void>
 }
 
 export function Sidebar({ 
@@ -32,8 +34,25 @@ export function Sidebar({
   onStop, 
   isStarting, 
   isStopping,
-  onOpenSettings
+  onOpenSettings,
+  onClosePosition
 }: SidebarProps) {
+  const [closingPositions, setClosingPositions] = useState<Set<string>>(new Set())
+
+  const handleClosePosition = async (marketId: string) => {
+    if (!onClosePosition) return
+    setClosingPositions(prev => new Set(prev).add(marketId))
+    try {
+      await onClosePosition(marketId)
+    } finally {
+      setClosingPositions(prev => {
+        const next = new Set(prev)
+        next.delete(marketId)
+        return next
+      })
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Bot Controls */}
@@ -139,8 +158,23 @@ export function Sidebar({
 
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {portfolio.positions.map((pos) => (
-              <div key={pos.market_id} className="bg-black/30 rounded-xl p-3 text-sm">
-                <div className="font-medium truncate mb-1" title={pos.question}>
+              <div key={pos.market_id} className="bg-black/30 rounded-xl p-3 text-sm relative group">
+                {/* Close button */}
+                {onClosePosition && (
+                  <button
+                    onClick={() => handleClosePosition(pos.market_id)}
+                    disabled={closingPositions.has(pos.market_id)}
+                    className="absolute top-2 right-2 p-1 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-400 opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                    title="Close position"
+                  >
+                    {closingPositions.has(pos.market_id) ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <X className="w-3 h-3" />
+                    )}
+                  </button>
+                )}
+                <div className="font-medium truncate mb-1 pr-6" title={pos.question}>
                   {pos.question.slice(0, 35)}...
                 </div>
                 <div className="flex justify-between text-xs text-gray-400">

@@ -242,6 +242,33 @@ export default function Home() {
     },
   })
 
+  // Close position
+  const closePosition = useMutation({
+    mutationFn: (marketId: string) => api.closePosition(marketId, 'manual'),
+    onSuccess: (data) => {
+      showCloseNotification('MANUAL', data.trade.question, data.trade.pnl)
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
+    },
+    onError: (error) => {
+      showError('Close Failed', `Failed to close position: ${error.message}`)
+    },
+  })
+
+  // Quick trade
+  const quickTrade = useMutation({
+    mutationFn: ({ marketId, side }: { marketId: string; side: 'yes' | 'no' }) => 
+      api.quickTrade(marketId, side, botSettings.trade_size),
+    onSuccess: (data) => {
+      showTradeNotification(data.trade.side, data.trade.question, data.trade.size)
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
+    },
+    onError: (error) => {
+      showError('Trade Failed', `Failed to open trade: ${error.message}`)
+    },
+  })
+
   // Analyze market
   const analyzeMutation = useMutation({
     mutationFn: (marketId: string) => api.analyzeMarket(marketId),
@@ -304,6 +331,10 @@ export default function Home() {
                 onMarketClick={handleAnalyze}
                 sortBy={sortBy}
                 onSortChange={setSortBy}
+                onQuickTrade={async (marketId, side) => {
+                  await quickTrade.mutateAsync({ marketId, side })
+                }}
+                existingPositions={new Set(portfolio?.positions?.map(p => p.market_id) ?? [])}
               />
             ) : (
               <EventList
@@ -329,6 +360,9 @@ export default function Home() {
               isStarting={startBot.isPending}
               isStopping={stopBot.isPending}
               onOpenSettings={() => setSettingsOpen(true)}
+              onClosePosition={async (marketId) => {
+                await closePosition.mutateAsync(marketId)
+              }}
             />
           </div>
         </div>

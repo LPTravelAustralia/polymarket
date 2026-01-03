@@ -1808,6 +1808,155 @@ async def get_equity_history():
     return {"history": app.state.equity_history}
 
 
+class ClosePositionRequest(BaseModel):
+    market_id: str
+    reason: str = "manual"  # manual, tp, sl
+
+
+@app.post("/api/bot/close-position")
+async def close_position(request: ClosePositionRequest):
+    """Manually close a position"""
+    market_id = request.market_id
+    reason = request.reason
+    
+    if market_id not in app.state.positions:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    pos = app.state.positions[market_id]
+    entry = float(pos.get("entry_price", 0))
+    mark = float(pos.get("mark_price", entry))
+    size = float(pos.get("size", 0))
+    side = pos.get("side", "yes")
+    
+    # Calculate realized PnL
+    if side == "yes":
+        realized_pnl = (mark - entry) * size
+    else:
+        realized_pnl = (entry - mark) * size
+    
+    # Log the close
+    add_activity(f"🔴 MANUAL closed {side.upper()} on {pos.get('question', '')[:35]}... PnL: ${realized_pnl:+.2f}")
+    
+    # Record closed trade
+    closed_trade = {
+        "market_id": market_id,
+        "question": pos.get("question", ""),
+        "side": side,
+        "size": size,
+        "entry_price": entry,
+        "exit_price": mark,
+        "pnl": realized_pnl,
+        "reason": reason.upper(),
+        "opened_at": pos.get("opened_at"),
+        "closed_at": datetime.now().isoformat(),
+    }
+    app.state.closed_trades.insert(0, closed_trade)
+    save_closed_trade(closed_trade)
+    
+    app.state.realized_pnl += realized_pnl
+    save_stat("realized_pnl", app.state.realized_pnl)
+    
+    # Remove from open positions
+    del app.state.positions[market_id]
+    delete_position(market_id)
+    
+    # Broadcast update
+    await broadcast_update({
+        "type": "close",
+        "reason": reason.upper(),
+        "trade": closed_trade,
+        "realized_pnl": app.state.realized_pnl,
+    })
+    
+    return {
+        "success": True,
+        "message": "Position closed",
+        "pnl": realized_pnl,
+        "trade": closed_trade
+    }
+
+
+class QuickTradeRequest(BaseModel):
+    market_id: str
+    side: str  # "yes" or "no"
+    size: float = 10.0
+
+
+@app.post("/api/bot/quick-trade")
+async def quick_trade(request: QuickTradeRequest):
+    """Quickly open a paper trade position on a market"""
+    market_id = request.market_id
+    side = request.side.lower()
+    size = request.size
+    
+    if side not in ["yes", "no"]:
+        raise HTTPException(status_code=400, detail="Side must be 'yes' or 'no'")
+    
+    if size <= 0 or size > 500:
+        raise HTTPException(status_code=400, detail="Size must be between 0 and 500")
+    
+    if market_id in app.state.positions:
+        raise HTTPException(status_code=400, detail="Already have a position in this market")
+    
+    # Get market data
+    markets = app.state.gamma_client.get_current_markets(limit=500)
+    market = None
+    for m in markets:
+        if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
+            market = parse_market(m)
+            break
+    
+    if not market:
+        raise HTTPException(status_code=404, detail="Market not found")
+    
+    # Determine entry price
+    entry_price = market.yes_price if side == "yes" else market.no_price
+    
+    # Create position
+    position = {
+        "market_id": market.id,
+        "question": market.question,
+        "side": side,
+        "size": float(size),
+        "entry_price": entry_price,
+        "mark_price": entry_price,
+        "unrealized_pnl": 0.0,
+        "opened_at": datetime.now().isoformat(),
+        "last_update": datetime.now().isoformat(),
+    }
+    app.state.positions[market.id] = position
+    save_position(position)
+    
+    # Create trade record
+    trade = {
+        "market_id": market.id,
+        "question": market.question,
+        "side": side,
+        "size": size,
+        "entry_price": entry_price,
+        "timestamp": datetime.now().isoformat(),
+        "mode": "paper",
+    }
+    app.state.trades.insert(0, trade)
+    save_trade(trade)
+    
+    add_activity(f"🟢 MANUAL entered {side.upper()} ${size} on {market.question[:38]}... at {entry_price:.2f}")
+    
+    # Broadcast update
+    await broadcast_update({
+        "type": "trade",
+        "trade": trade,
+        "position": position,
+    })
+    
+    return {
+        "success": True,
+        "message": "Trade opened",
+        "trade": trade,
+        "position": position
+    }
+
+
 @app.post("/api/analyze/{market_id}", response_model=AnalysisResponse)
 async def analyze_market(market_id: str):
     """Analyze a market using AI (demo mode)"""

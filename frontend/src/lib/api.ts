@@ -252,6 +252,31 @@ export const api = {
     return fetchAPI('/api/bot/equity-history')
   },
 
+  // Position management
+  closePosition: async (marketId: string, reason: string = 'manual'): Promise<{ 
+    success: boolean
+    message: string
+    pnl: number
+    trade: ClosedTrade 
+  }> => {
+    return fetchAPI('/api/bot/close-position', {
+      method: 'POST',
+      body: JSON.stringify({ market_id: marketId, reason }),
+    })
+  },
+
+  quickTrade: async (marketId: string, side: 'yes' | 'no', size: number = 10): Promise<{
+    success: boolean
+    message: string
+    trade: Trade
+    position: Position
+  }> => {
+    return fetchAPI('/api/bot/quick-trade', {
+      method: 'POST',
+      body: JSON.stringify({ market_id: marketId, side, size }),
+    })
+  },
+
   // Analysis
   analyzeMarket: async (marketId: string): Promise<Analysis> => {
     return fetchAPI(`/api/analyze/${marketId}`, { method: 'POST' })

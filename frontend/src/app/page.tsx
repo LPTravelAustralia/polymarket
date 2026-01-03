@@ -257,8 +257,8 @@ export default function Home() {
 
   // Quick trade
   const quickTrade = useMutation({
-    mutationFn: ({ marketId, side }: { marketId: string; side: 'yes' | 'no' }) => 
-      api.quickTrade(marketId, side, botSettings.trade_size),
+    mutationFn: ({ marketId, side, size }: { marketId: string; side: 'yes' | 'no'; size: number }) => 
+      api.quickTrade(marketId, side, size),
     onSuccess: (data) => {
       showTradeNotification(data.trade.side, data.trade.question, data.trade.size)
       queryClient.invalidateQueries({ queryKey: ['portfolio'] })
@@ -331,10 +331,11 @@ export default function Home() {
                 onMarketClick={handleAnalyze}
                 sortBy={sortBy}
                 onSortChange={setSortBy}
-                onQuickTrade={async (marketId, side) => {
-                  await quickTrade.mutateAsync({ marketId, side })
+                onQuickTrade={async (marketId, side, size) => {
+                  await quickTrade.mutateAsync({ marketId, side, size })
                 }}
                 existingPositions={new Set(portfolio?.positions?.map(p => p.market_id) ?? [])}
+                defaultTradeSize={botSettings.trade_size}
               />
             ) : (
               <EventList

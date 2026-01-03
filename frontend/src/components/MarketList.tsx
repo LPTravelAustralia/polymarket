@@ -14,8 +14,9 @@ interface MarketListProps {
   onMarketClick: (market: Market) => void
   sortBy?: string
   onSortChange?: (sort: string) => void
-  onQuickTrade?: (marketId: string, side: 'yes' | 'no') => Promise<void>
+  onQuickTrade?: (marketId: string, side: 'yes' | 'no', size: number) => Promise<void>
   existingPositions?: Set<string>
+  defaultTradeSize?: number
 }
 
 const categories = [
@@ -44,16 +45,17 @@ export function MarketList({
   onSortChange,
   onQuickTrade,
   existingPositions,
+  defaultTradeSize = 25,
 }: MarketListProps) {
   const [tradingMarkets, setTradingMarkets] = useState<Set<string>>(new Set())
 
-  const handleQuickTrade = async (e: React.MouseEvent, marketId: string, side: 'yes' | 'no') => {
+  const handleQuickTrade = async (e: React.MouseEvent, marketId: string, side: 'yes' | 'no', size: number) => {
     e.stopPropagation()
     if (!onQuickTrade) return
     
     setTradingMarkets(prev => new Set(prev).add(marketId))
     try {
-      await onQuickTrade(marketId, side)
+      await onQuickTrade(marketId, side, size)
     } finally {
       setTradingMarkets(prev => {
         const next = new Set(prev)
@@ -149,9 +151,10 @@ export function MarketList({
               market={market}
               index={index}
               onClick={() => onMarketClick(market)}
-              onQuickTrade={onQuickTrade ? (side) => handleQuickTrade({ stopPropagation: () => {} } as React.MouseEvent, market.id, side) : undefined}
+              onQuickTrade={onQuickTrade ? (side, size) => handleQuickTrade({ stopPropagation: () => {} } as React.MouseEvent, market.id, side, size) : undefined}
               isTrading={tradingMarkets.has(market.id)}
               hasPosition={existingPositions?.has(market.id)}
+              defaultSize={defaultTradeSize}
             />
           ))
         )}
@@ -166,15 +169,18 @@ function MarketCard({
   onClick,
   onQuickTrade,
   isTrading,
-  hasPosition
+  hasPosition,
+  defaultSize = 25
 }: { 
   market: Market
   index: number
   onClick: () => void
-  onQuickTrade?: (side: 'yes' | 'no') => void
+  onQuickTrade?: (side: 'yes' | 'no', size: number) => void
   isTrading?: boolean
   hasPosition?: boolean
+  defaultSize?: number
 }) {
+  const [tradeSize, setTradeSize] = useState(defaultSize)
   const yesPercent = Math.round(market.yes_price * 100)
   const hasVolume24h = market.volume_24h && market.volume_24h > 0
 
@@ -241,10 +247,22 @@ function MarketCard({
             </span>
           ) : (
             <>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500">$</span>
+                <input
+                  type="number"
+                  value={tradeSize}
+                  onChange={(e) => setTradeSize(Math.max(1, Math.min(500, Number(e.target.value))))}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-14 px-2 py-1.5 bg-white/10 border border-white/20 rounded-lg text-xs text-white text-center focus:outline-none focus:border-primary-500"
+                  min={1}
+                  max={500}
+                />
+              </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  onQuickTrade('yes')
+                  onQuickTrade('yes', tradeSize)
                 }}
                 className="flex-1 py-2 bg-green-500/20 hover:bg-green-500/40 text-green-400 text-xs font-semibold rounded-lg transition-colors"
               >
@@ -253,7 +271,7 @@ function MarketCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  onQuickTrade('no')
+                  onQuickTrade('no', tradeSize)
                 }}
                 className="flex-1 py-2 bg-red-500/20 hover:bg-red-500/40 text-red-400 text-xs font-semibold rounded-lg transition-colors"
               >

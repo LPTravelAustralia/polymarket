@@ -1,6 +1,6 @@
 # Polymarket Trading Bot - Setup Reference
 
-**Last Updated:** January 2, 2026
+**Last Updated:** January 3, 2026
 
 ## Current Status
 
@@ -17,9 +17,14 @@
 | Kelly Criterion Sizing | ✅ Working | Dynamic position sizing |
 | Take Profit / Stop Loss | ✅ Working | Auto-exit on profit/loss thresholds |
 | Selectable Markets API | ✅ Working | `/api/selectable-markets` endpoint |
+| **Manual Market Selection UI** | ✅ Working | Select specific markets to trade from Settings → Filters |
 | Price Charts | ✅ Working | Historical price data display |
+| **PnL Chart (Recharts)** | ✅ Working | Interactive equity curve with tooltips |
 | Activity Log | ✅ Working | Real-time trade notifications |
+| **Toast Notifications** | ✅ Working | Pop-up alerts for trades and closes |
 | Paper Trading | ✅ Working | Simulated trades, no real money |
+| **Volatility Filter** | ✅ Working | Min volatility setting in UI |
+| **24h Volume Filter** | ✅ Working | Min volume 24h setting in UI |
 
 ### ⚠️ NEEDS API KEYS (Falls back to momentum without them)
 | Feature | Required Key | How to Add |
@@ -31,8 +36,6 @@
 | Item | Status | Notes |
 |------|--------|-------|
 | Live Trading | 🔴 Disabled | Needs wallet keys, currently paper-trading only |
-| Manual Market Selection UI | 🔴 Missing | Backend supports it, frontend UI not built |
-| PnL Chart | 🟡 Basic | Shows data but needs better visualization |
 | Mobile Responsive | 🟡 Partial | Works but could be improved |
 
 ---
@@ -278,12 +281,12 @@ https://ssh.cloud.google.com/v2/ssh/projects/polymarket-482905/zones/us-central1
 ## Next Steps / TODO
 
 ### High Priority
-1. **Manual Market Selection UI** - Add UI to let user select specific markets to trade
-2. **Better PnL visualization** - Improve the equity curve chart
-3. **Notifications** - Add alerts when trades execute
+1. ~~**Manual Market Selection UI**~~ ✅ DONE - Select specific markets from Settings → Filters
+2. ~~**Better PnL visualization**~~ ✅ DONE - Interactive Recharts equity curve
+3. ~~**Notifications**~~ ✅ DONE - Toast alerts for trades and closes
 
 ### Medium Priority
-4. **Volatility/Activity filters** - Add UI controls for `min_volatility`, `min_volume_24h`
+4. ~~**Volatility/Activity filters**~~ ✅ DONE - min_volatility, min_volume_24h in UI
 5. **More graph usage** - Show more analytics (win rate over time, etc.)
 6. **Strategy comparison** - Show which strategy performs best
 

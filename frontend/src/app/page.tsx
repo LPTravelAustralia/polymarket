@@ -9,6 +9,7 @@ import { EventList } from '@/components/EventList'
 import { Sidebar } from '@/components/Sidebar'
 import { MarketModal } from '@/components/MarketModal'
 import { SettingsPanel } from '@/components/SettingsPanel'
+import { ToastContainer, useToasts } from '@/components/Toast'
 import { api, Market, BotStatus, Portfolio, BotConfig, MarketsResponse, EventsResponse } from '@/lib/api'
 
 const DEFAULT_SETTINGS: BotConfig = {
@@ -24,8 +25,10 @@ const DEFAULT_SETTINGS: BotConfig = {
   // New settings with defaults
   categories: [],
   min_liquidity: 1000,
-  min_volume: 500,
+  min_volume: 0,
+  min_volume_24h: 0,
   max_spread: 0.1,
+  min_volatility: 0,
   use_kelly_sizing: false,
   kelly_fraction: 0.5,
   min_edge: 0.05,
@@ -74,6 +77,9 @@ export default function Home() {
   const [wsDisabled, setWsDisabled] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null)
+  
+  // Toast notifications
+  const { toasts, dismissToast, showTradeNotification, showCloseNotification, showSuccess, showError } = useToasts()
 
   // WebSocket connection for real-time updates
   const connectWebSocket = useCallback(() => {
@@ -112,11 +118,25 @@ export default function Home() {
               running: data.running,
             }))
           } else if (data.type === 'trade') {
-            // New trade opened - refresh portfolio
+            // New trade opened - show notification and refresh
+            if (data.trade) {
+              showTradeNotification(
+                data.trade.side,
+                data.trade.question,
+                data.trade.size
+              )
+            }
             queryClient.invalidateQueries({ queryKey: ['portfolio'] })
             queryClient.invalidateQueries({ queryKey: ['activity'] })
           } else if (data.type === 'close') {
-            // Position closed (TP/SL/resolved) - refresh all
+            // Position closed (TP/SL/resolved) - show notification and refresh
+            if (data.trade) {
+              showCloseNotification(
+                data.reason || 'closed',
+                data.trade.question,
+                data.trade.pnl
+              )
+            }
             queryClient.invalidateQueries({ queryKey: ['portfolio'] })
             queryClient.invalidateQueries({ queryKey: ['activity'] })
           } else if (data.type === 'activity') {
@@ -333,6 +353,9 @@ export default function Home() {
         onSave={setBotSettings}
         disabled={status?.running}
       />
+
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   )
 }

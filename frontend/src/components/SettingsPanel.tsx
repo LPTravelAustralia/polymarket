@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Settings, X, ChevronDown, ChevronUp, Info } from 'lucide-react'
+import { Settings, X, ChevronDown, ChevronUp, Info, Target } from 'lucide-react'
+import { MarketSelector } from './MarketSelector'
 
 interface BotSettings {
   trade_size: number
@@ -13,11 +14,15 @@ interface BotSettings {
   take_profit: number
   stop_loss: number
   agent: string
+  // Market selection
+  markets?: string[] | null
   // New settings (optional with defaults)
   categories?: string[]
   min_liquidity?: number
   min_volume?: number
+  min_volume_24h?: number
   max_spread?: number
+  min_volatility?: number
   use_kelly_sizing?: boolean
   kelly_fraction?: number
   min_edge?: number
@@ -95,6 +100,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, disabled }: S
   const [localSettings, setLocalSettings] = useState<BotSettings>(settings)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [activeTab, setActiveTab] = useState<'basic' | 'strategy' | 'filters' | 'risk'>('basic')
+  const [showMarketSelector, setShowMarketSelector] = useState(false)
 
   if (!isOpen) return null
 
@@ -335,6 +341,38 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, disabled }: S
           {/* FILTERS TAB */}
           {activeTab === 'filters' && (
             <>
+              {/* Manual Market Selection */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-primary-500/10 to-purple-500/10 border border-primary-500/30">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                    🎯 Manual Market Selection
+                  </label>
+                  <button
+                    onClick={() => setShowMarketSelector(true)}
+                    disabled={disabled}
+                    className="px-3 py-1.5 bg-primary-500 hover:bg-primary-600 text-black text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {(localSettings.markets?.length || 0) > 0 
+                      ? `${localSettings.markets?.length} Selected` 
+                      : 'Select Markets'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  {(localSettings.markets?.length || 0) > 0 
+                    ? 'Bot will only trade these specific markets' 
+                    : 'Leave empty for auto-discovery based on filters below'}
+                </p>
+                {(localSettings.markets?.length || 0) > 0 && (
+                  <button
+                    onClick={() => updateSetting('markets', null)}
+                    disabled={disabled}
+                    className="mt-2 text-xs text-red-400 hover:text-red-300"
+                  >
+                    Clear selection (use auto-discovery)
+                  </button>
+                )}
+              </div>
+
               {/* Category Filters */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-3">
@@ -387,21 +425,21 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, disabled }: S
               {/* Minimum Volume */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Min 24h Volume: ${(localSettings.min_volume || 500).toLocaleString()}
+                  Min 24h Volume: ${(localSettings.min_volume_24h || 0).toLocaleString()}
                 </label>
                 <input
                   type="range"
                   min="0"
-                  max="10000"
-                  step="250"
-                  value={localSettings.min_volume || 500}
-                  onChange={(e) => updateSetting('min_volume', Number(e.target.value))}
+                  max="25000"
+                  step="500"
+                  value={localSettings.min_volume_24h || 0}
+                  onChange={(e) => updateSetting('min_volume_24h', Number(e.target.value))}
                   disabled={disabled}
                   className="w-full accent-primary-500"
                 />
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>$0</span>
-                  <span>$10k</span>
+                  <span>$0 (disabled)</span>
+                  <span>$25k</span>
                 </div>
               </div>
 
@@ -424,6 +462,29 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, disabled }: S
                   <span>1%</span>
                   <span>20%</span>
                 </div>
+              </div>
+
+              {/* Min Volatility */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Min Volatility: {((localSettings.min_volatility || 0) * 100).toFixed(0)}%
+                  <span className="text-xs text-gray-500 ml-2">(0 = disabled)</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.1"
+                  step="0.005"
+                  value={localSettings.min_volatility || 0}
+                  onChange={(e) => updateSetting('min_volatility', Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-full accent-yellow-500"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>0%</span>
+                  <span>10%</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Only trade markets with sufficient price movement</p>
               </div>
 
               {/* Time to Expiry */}
@@ -583,6 +644,15 @@ export function SettingsPanel({ isOpen, onClose, settings, onSave, disabled }: S
           </div>
         )}
       </div>
+
+      {/* Market Selector Modal */}
+      <MarketSelector
+        isOpen={showMarketSelector}
+        onClose={() => setShowMarketSelector(false)}
+        selectedMarkets={localSettings.markets || []}
+        onSelectionChange={(markets) => updateSetting('markets', markets.length > 0 ? markets : null)}
+        disabled={disabled}
+      />
     </div>
   )
 }

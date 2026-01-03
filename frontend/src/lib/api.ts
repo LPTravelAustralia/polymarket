@@ -130,6 +130,7 @@ export interface BotConfig {
   categories?: string[]
   min_liquidity?: number
   min_volume?: number
+  min_volume_24h?: number
   max_spread?: number
   use_kelly_sizing?: boolean
   kelly_fraction?: number
@@ -138,6 +139,7 @@ export interface BotConfig {
   momentum_period?: number
   use_volume_filter?: boolean
   volume_spike_threshold?: number
+  min_volatility?: number
   auto_exit_on_resolution?: boolean
   time_to_expiry_filter?: number
 }

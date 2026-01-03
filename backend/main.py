@@ -850,6 +850,7 @@ async def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig)
     """Mark positions to market, check TP/SL and resolution, return total unrealized PnL"""
     total_pnl = 0.0
     positions_to_close = []
+    significant_moves = []  # Track significant price movements
     
     for mid, pos in list(app.state.positions.items()):
         market = markets.get(mid)
@@ -858,6 +859,7 @@ async def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig)
         side = pos.get("side")
         entry = float(pos.get("entry_price", 0))
         size = float(pos.get("size", 0))
+        old_mark = float(pos.get("mark_price", entry))
         
         # Check if market has resolved
         if market.closed and market.resolved_outcome:
@@ -881,12 +883,22 @@ async def _mark_positions(markets: Dict[str, MarketResponse], config: BotConfig)
         pos["last_update"] = datetime.now().isoformat()
         total_pnl += pnl
         
+        # Track significant price movements (>2% change from last mark)
+        price_change_pct = abs(mark_price - old_mark) / old_mark if old_mark > 0 else 0
+        if price_change_pct >= 0.02:  # 2% or more price change
+            direction = "📈" if mark_price > old_mark else "📉"
+            significant_moves.append(f"{direction} {pos.get('question', '')[:25]}... {old_mark:.2f}→{mark_price:.2f}")
+        
         # Check take-profit / stop-loss
         pnl_pct = pnl / (entry * size) if entry * size > 0 else 0
         if pnl_pct >= config.take_profit:
             positions_to_close.append((mid, pos, pnl, "TP"))
         elif pnl_pct <= -config.stop_loss:
             positions_to_close.append((mid, pos, pnl, "SL"))
+    
+    # Log significant price movements (max 2 to avoid spam)
+    for move in significant_moves[:2]:
+        add_activity(move)
     
     # Close triggered positions
     for mid, pos, realized_pnl, reason in positions_to_close:
@@ -1081,9 +1093,16 @@ async def _trading_loop(config: BotConfig):
                 except Exception as e:
                     add_activity(f"⚠️ Could not check resolution: {str(e)[:30]}")
             
-            if not app.state.positions:  # Log once at start
-                filter_msg = f" ({filtered_count} filtered out)" if filtered_count > 0 else ""
-                add_activity(f"📊 Scanned {len(markets_raw)} markets, {tradeable_count} passed filters{filter_msg}")
+            # Log scanning activity periodically (not just when no positions)
+            filter_msg = f" ({filtered_count} filtered out)" if filtered_count > 0 else ""
+            positions_msg = f" | Monitoring {len(app.state.positions)}/{config.max_markets} positions" if app.state.positions else ""
+            # Only log scan message every 5 iterations to avoid spam
+            if not hasattr(app.state, '_scan_counter'):
+                app.state._scan_counter = 0
+            app.state._scan_counter += 1
+            if app.state._scan_counter == 1 or app.state._scan_counter % 5 == 0:
+                add_activity(f"📊 Scanned {len(markets_raw)} markets, {tradeable_count} passed filters{filter_msg}{positions_msg}")
+            
             # Mark existing positions and check TP/SL
             total_pnl = await _mark_positions(parsed_markets, config)
             # Include realized PnL from closed trades
@@ -1100,6 +1119,18 @@ async def _trading_loop(config: BotConfig):
                 add_activity("⚠️ Drawdown limit hit - stopping bot")
                 app.state.bot_running = False
                 break
+
+            # Check if at max capacity
+            current_positions = len(app.state.positions)
+            if current_positions >= config.max_markets:
+                # Log capacity message once per 10 iterations
+                if not hasattr(app.state, '_capacity_warned'):
+                    app.state._capacity_warned = 0
+                app.state._capacity_warned += 1
+                if app.state._capacity_warned == 1 or app.state._capacity_warned % 10 == 0:
+                    add_activity(f"📈 At max capacity ({current_positions}/{config.max_markets}) - monitoring positions for TP/SL triggers")
+            else:
+                app.state._capacity_warned = 0  # Reset when not at capacity
 
             # Consider new trades - iterate all markets to find tradeable ones
             trades_opened = 0

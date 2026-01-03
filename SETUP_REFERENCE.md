@@ -104,6 +104,67 @@ This project uses **remote deployment only** - NOT local development servers.
 - **Backend**: Hosted on GCloud VM at `136.114.57.247:8000`
 - **API Proxy**: Netlify proxies `/api/*` requests to the GCloud backend
 
+---
+
+## 📱 NETLIFY FRONTEND DEPLOYMENT
+
+The frontend is a **Next.js React app** in the `/frontend` directory.
+
+### Initial Netlify Setup (One-Time)
+
+1. **Go to Netlify**: https://app.netlify.com
+2. **Add new site** → Import from Git → Select your GitHub repo
+3. **Configure Build Settings**:
+   - **Base directory**: `frontend`
+   - **Build command**: `npm run build`
+   - **Publish directory**: `frontend/.next`
+4. **Add the Next.js Plugin**:
+   - Go to **Site configuration** → **Build & deploy** → **Plugins**
+   - Search for `@netlify/plugin-nextjs` and install it
+5. **Set Environment Variable** (optional):
+   - Go to **Environment variables**
+   - Add: `NEXT_PUBLIC_API_URL` = `http://136.114.57.247:8000` (or leave empty for proxy)
+6. **Deploy** → Trigger deploy
+
+### Netlify Build Settings Summary
+
+| Setting | Value |
+|---------|-------|
+| Base directory | `frontend` |
+| Build command | `npm run build` |
+| Publish directory | `frontend/.next` |
+| Required plugin | `@netlify/plugin-nextjs` |
+
+### After Initial Setup
+
+The frontend **auto-deploys** whenever you push to the `copilot/build-polymarket-trading-bot` branch.
+
+### Manual Redeploy
+
+1. Go to Netlify Dashboard → Your Site → **Deploys**
+2. Click **Trigger deploy** → **Deploy site**
+
+### Netlify CLI Alternative
+
+```bash
+# Install Netlify CLI
+npm install -g netlify-cli
+
+# Login to Netlify
+netlify login
+
+# Deploy from frontend folder
+cd frontend
+netlify deploy --prod
+```
+
+### Current Live URL
+- **Frontend**: https://boisterous-basbousa-e11b8a.netlify.app/
+
+---
+
+## 🖥️ BACKEND DEPLOYMENT (GCloud VM)
+
 ### Step-by-Step: Deploy Code Changes
 
 #### 1. Push code to GitHub (from dev container or local)

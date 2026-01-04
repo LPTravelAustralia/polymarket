@@ -1,7 +1,7 @@
 'use client'
 
 import { Market, Analysis, formatCurrency, formatPercent } from '@/lib/api'
-import { X, TrendingUp, TrendingDown, Minus, ExternalLink, Loader2 } from 'lucide-react'
+import { X, TrendingUp, TrendingDown, Minus, ExternalLink, Loader2, RefreshCw } from 'lucide-react'
 import { PriceChart } from './PriceChart'
 
 interface MarketModalProps {
@@ -9,9 +9,10 @@ interface MarketModalProps {
   analysis?: Analysis
   isAnalyzing: boolean
   onClose: () => void
+  onAnalyze?: () => void
 }
 
-export function MarketModal({ market, analysis, isAnalyzing, onClose }: MarketModalProps) {
+export function MarketModal({ market, analysis, isAnalyzing, onClose, onAnalyze }: MarketModalProps) {
   const yesPercent = Math.round(market.yes_price * 100)
   const noPercent = Math.round(market.no_price * 100)
 
@@ -105,9 +106,21 @@ export function MarketModal({ market, analysis, isAnalyzing, onClose }: MarketMo
 
           {/* AI Analysis */}
           <div className="bg-white/5 rounded-xl p-4">
-            <h3 className="font-semibold mb-4 flex items-center gap-2">
-              <span>🤖</span> AI Analysis
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <span>🤖</span> AI Analysis
+              </h3>
+              {onAnalyze && (
+                <button
+                  onClick={onAnalyze}
+                  disabled={isAnalyzing}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-primary-500/20 hover:bg-primary-500/30 text-primary-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
+                  {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                </button>
+              )}
+            </div>
 
             {isAnalyzing ? (
               <div className="flex items-center justify-center gap-3 py-8 text-gray-400">

@@ -378,6 +378,9 @@ export default function Home() {
             setSelectedMarket(null)
             analyzeMutation.reset()
           }}
+          onAnalyze={() => {
+            analyzeMutation.mutate(selectedMarket.id)
+          }}
         />
       )}
 

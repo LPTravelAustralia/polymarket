@@ -788,17 +788,8 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     if 0.45 <= market.yes_price <= 0.55:
         return None
     
-    # Trade markets with prices between 5% and 95% (match _passes_filters)
-    if market.yes_price < 0.05 or market.yes_price > 0.95:
-        return None
-    
-    # Require decent liquidity
-    if market.liquidity < 5000:
-        return None
-    
-    # Require some 24h volume (active market)
-    if (market.volume_24h or 0) < 1000:
-        return None
+    # Note: Price range, liquidity, and volume filters are already applied by _passes_filters
+    # No need to duplicate them here
     
     history = app.state.price_history.get(market.id, deque())
     

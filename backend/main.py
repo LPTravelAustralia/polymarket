@@ -258,19 +258,44 @@ async def lifespan(app: FastAPI):
     
     # Start background market refresh task
     async def refresh_markets_cache():
-        """Background task to refresh markets cache every 5 minutes"""
+        """Background task to refresh markets cache - starts small, then expands"""
+        iteration = 0
         while True:
             try:
-                print("📡 Refreshing global markets cache...")
-                markets = app.state.gamma_client.get_all_current_markets(max_markets=15000)
+                iteration += 1
+                # Gradually increase cache size to not overwhelm small VMs
+                # Iteration 1: 500 (instant)
+                # Iteration 2: 2000 
+                # Iteration 3+: 5000 (reasonable limit)
+                if iteration == 1:
+                    max_markets = 500  # Quick start - just first page
+                    print("📡 Loading quick market cache (500 markets)...")
+                elif iteration == 2:
+                    max_markets = 2000
+                    print("📡 Expanding market cache (2000 markets)...")
+                else:
+                    max_markets = 5000  # Cap at 5000 to prevent VM freeze
+                    print("📡 Refreshing market cache (5000 markets)...")
+                
+                # Run in thread to not block event loop
+                markets = await asyncio.to_thread(
+                    app.state.gamma_client.get_all_current_markets,
+                    max_markets=max_markets
+                )
+                
                 app.state.all_markets_cache = markets
                 app.state.markets_cache_updated = datetime.now()
-                print(f"✅ Markets cache refreshed: {len(markets)} active markets")
+                print(f"✅ Markets cache ready: {len(markets)} active markets")
             except Exception as e:
                 print(f"❌ Error refreshing markets cache: {e}")
-            await asyncio.sleep(300)  # 5 minutes
+            
+            # Wait before next refresh (shorter wait for first iterations)
+            if iteration <= 2:
+                await asyncio.sleep(60)  # 1 minute for first expansions
+            else:
+                await asyncio.sleep(300)  # 5 minutes for regular refreshes
     
-    # Start the background task
+    # Start the background task (non-blocking)
     cache_task = asyncio.create_task(refresh_markets_cache())
     
     yield
@@ -1111,24 +1136,16 @@ async def _trading_loop(config: BotConfig):
     app.state.equity_peak = app.state.equity_start
     gamma = app.state.gamma_client
     
-    # Cache for all markets (refreshed periodically)
-    all_markets_cache = []
-    cache_refresh_counter = 0
-    CACHE_REFRESH_INTERVAL = 10  # Refresh full market list every 10 iterations (~10 mins)
-    
     try:
         while app.state.bot_running:
-            # Refresh full market cache periodically for better coverage
-            if cache_refresh_counter == 0 or cache_refresh_counter >= CACHE_REFRESH_INTERVAL:
-                add_activity("📡 Refreshing full market list (this may take a moment)...")
-                all_markets_cache = gamma.get_all_current_markets(max_markets=10000)
-                add_activity(f"📊 Loaded {len(all_markets_cache)} active markets from Polymarket")
-                cache_refresh_counter = 1
+            # Use global cache if available, otherwise fetch a small batch
+            if app.state.all_markets_cache and len(app.state.all_markets_cache) > 100:
+                markets_raw = app.state.all_markets_cache
             else:
-                cache_refresh_counter += 1
+                # Fallback: fetch small batch to not freeze
+                markets_raw = gamma.get_current_markets(limit=500)
+                add_activity(f"📊 Using {len(markets_raw)} markets (cache still loading)")
             
-            # Use cached markets
-            markets_raw = all_markets_cache
             parsed_markets: Dict[str, MarketResponse] = {}
 
             # Prepare market map and update price history

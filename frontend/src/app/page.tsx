@@ -61,7 +61,7 @@ const getWsUrl = () => {
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
     return 'ws://localhost:8000/ws'
   }
-  return 'ws://136.114.57.247:8000/ws'
+  return 'wss://bot.travorro.com/ws'
 }
 
 export default function Home() {

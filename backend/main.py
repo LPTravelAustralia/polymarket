@@ -1430,10 +1430,22 @@ async def get_markets(
 @app.get("/api/markets/cache-status")
 async def get_markets_cache_status():
     """Get the status of the markets cache"""
+    # Get sample of field names from first cached market for debugging
+    sample_fields = {}
+    if app.state.all_markets_cache:
+        first_market = app.state.all_markets_cache[0]
+        sample_fields = {
+            "keys": list(first_market.keys())[:20],
+            "conditionId": first_market.get("conditionId"),
+            "id": first_market.get("id"),
+            "condition_id": first_market.get("condition_id"),
+            "question": first_market.get("question", "")[:50]
+        }
     return {
         "cached_markets": len(app.state.all_markets_cache),
         "last_updated": app.state.markets_cache_updated.isoformat() if app.state.markets_cache_updated else None,
-        "cache_ready": len(app.state.all_markets_cache) > 500
+        "cache_ready": len(app.state.all_markets_cache) > 500,
+        "sample": sample_fields
     }
 
 

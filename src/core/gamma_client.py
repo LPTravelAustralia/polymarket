@@ -95,6 +95,54 @@ class GammaMarketClient:
             }
         )
     
+    def get_all_current_markets(self, max_markets: int = 5000) -> List[Dict[str, Any]]:
+        """
+        Get ALL active markets using pagination.
+        The Gamma API has a max limit of 500 per request, so we paginate.
+        
+        Args:
+            max_markets: Maximum total markets to fetch (default 5000 to be reasonable)
+            
+        Returns:
+            List of all active market data dictionaries
+        """
+        all_markets = []
+        offset = 0
+        page_size = 500  # API max
+        
+        while len(all_markets) < max_markets:
+            try:
+                params = {
+                    "active": True,
+                    "closed": False,
+                    "archived": False,
+                    "limit": page_size,
+                    "offset": offset,
+                }
+                response = httpx.get(self.gamma_markets_endpoint, params=params, timeout=30)
+                if response.status_code != 200:
+                    logger.error(f"Gamma API error: {response.status_code}")
+                    break
+                    
+                batch = response.json()
+                if not batch:
+                    break  # No more markets
+                    
+                all_markets.extend(batch)
+                logger.info(f"Fetched {len(all_markets)} markets (offset {offset})")
+                
+                if len(batch) < page_size:
+                    break  # Last page
+                    
+                offset += page_size
+                
+            except Exception as e:
+                logger.error(f"Error fetching markets at offset {offset}: {e}")
+                break
+        
+        logger.info(f"Total markets fetched: {len(all_markets)}")
+        return all_markets[:max_markets]
+    
     def get_current_events(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get active, non-closed, non-archived events"""
         return self.get_events(

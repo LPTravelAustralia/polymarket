@@ -249,10 +249,34 @@ async def lifespan(app: FastAPI):
     app.state.equity_peak = 0.0
     app.state.connected_clients: List[WebSocket] = []
     
+    # Global markets cache (refreshed every 5 minutes)
+    app.state.all_markets_cache: List[Dict[str, Any]] = []
+    app.state.markets_cache_updated: Optional[datetime] = None
+    
     if saved["positions"]:
         print(f"📂 Loaded {len(saved['positions'])} positions, ${saved['realized_pnl']:.2f} realized PnL")
     
+    # Start background market refresh task
+    async def refresh_markets_cache():
+        """Background task to refresh markets cache every 5 minutes"""
+        while True:
+            try:
+                print("📡 Refreshing global markets cache...")
+                markets = app.state.gamma_client.get_all_current_markets(max_markets=15000)
+                app.state.all_markets_cache = markets
+                app.state.markets_cache_updated = datetime.now()
+                print(f"✅ Markets cache refreshed: {len(markets)} active markets")
+            except Exception as e:
+                print(f"❌ Error refreshing markets cache: {e}")
+            await asyncio.sleep(300)  # 5 minutes
+    
+    # Start the background task
+    cache_task = asyncio.create_task(refresh_markets_cache())
+    
     yield
+    
+    # Cancel background task on shutdown
+    cache_task.cancel()
     print("👋 Shutting down...")
 
 
@@ -1086,10 +1110,25 @@ async def _trading_loop(config: BotConfig):
     app.state.equity_start = float(config.global_cap)
     app.state.equity_peak = app.state.equity_start
     gamma = app.state.gamma_client
+    
+    # Cache for all markets (refreshed periodically)
+    all_markets_cache = []
+    cache_refresh_counter = 0
+    CACHE_REFRESH_INTERVAL = 10  # Refresh full market list every 10 iterations (~10 mins)
+    
     try:
         while app.state.bot_running:
-            # Fetch many markets - increased limit for better coverage
-            markets_raw = gamma.get_current_markets(limit=500)
+            # Refresh full market cache periodically for better coverage
+            if cache_refresh_counter == 0 or cache_refresh_counter >= CACHE_REFRESH_INTERVAL:
+                add_activity("📡 Refreshing full market list (this may take a moment)...")
+                all_markets_cache = gamma.get_all_current_markets(max_markets=10000)
+                add_activity(f"📊 Loaded {len(all_markets_cache)} active markets from Polymarket")
+                cache_refresh_counter = 1
+            else:
+                cache_refresh_counter += 1
+            
+            # Use cached markets
+            markets_raw = all_markets_cache
             parsed_markets: Dict[str, MarketResponse] = {}
 
             # Prepare market map and update price history
@@ -1317,16 +1356,20 @@ async def get_markets(
 ):
     """Get active markets from Polymarket with filtering and sorting"""
     try:
-        # Fetch more markets for better filtering (we'll paginate client-side)
-        fetch_limit = max(500, limit * 3)
-        
-        if search:
-            raw_markets = app.state.gamma_client.search_markets(search, limit=fetch_limit)
+        # Use cached markets if available, otherwise fetch
+        if app.state.all_markets_cache and len(app.state.all_markets_cache) > 500:
+            raw_markets = app.state.all_markets_cache
         else:
-            raw_markets = app.state.gamma_client.get_current_markets(limit=fetch_limit)
+            # Fallback to fresh fetch if cache not ready
+            raw_markets = app.state.gamma_client.get_all_current_markets(max_markets=10000)
         
         # Parse all markets
         parsed = [parse_market(m) for m in raw_markets]
+        
+        # Filter by search if specified
+        if search:
+            search_lower = search.lower()
+            parsed = [m for m in parsed if search_lower in m.question.lower()]
         
         # Filter out expired markets (end_date in the past)
         now = datetime.now().isoformat()
@@ -1367,6 +1410,32 @@ async def get_markets(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/markets/cache-status")
+async def get_markets_cache_status():
+    """Get the status of the markets cache"""
+    return {
+        "cached_markets": len(app.state.all_markets_cache),
+        "last_updated": app.state.markets_cache_updated.isoformat() if app.state.markets_cache_updated else None,
+        "cache_ready": len(app.state.all_markets_cache) > 500
+    }
+
+
+@app.post("/api/markets/refresh-cache")
+async def refresh_markets_cache():
+    """Manually refresh the markets cache"""
+    try:
+        markets = app.state.gamma_client.get_all_current_markets(max_markets=15000)
+        app.state.all_markets_cache = markets
+        app.state.markets_cache_updated = datetime.now()
+        return {
+            "success": True,
+            "cached_markets": len(markets),
+            "updated_at": app.state.markets_cache_updated.isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/selectable-markets")
 async def get_selectable_markets(
     limit: int = 100,
@@ -1380,14 +1449,18 @@ async def get_selectable_markets(
     Designed for populating a market selection UI.
     """
     try:
-        fetch_limit = 500
-        
-        if search:
-            raw_markets = app.state.gamma_client.search_markets(search, limit=fetch_limit)
+        # Use cached markets if available
+        if app.state.all_markets_cache and len(app.state.all_markets_cache) > 500:
+            raw_markets = app.state.all_markets_cache
         else:
-            raw_markets = app.state.gamma_client.get_current_markets(limit=fetch_limit)
+            raw_markets = app.state.gamma_client.get_all_current_markets(max_markets=10000)
         
         parsed = [parse_market(m) for m in raw_markets]
+        
+        # Filter by search if specified
+        if search:
+            search_lower = search.lower()
+            parsed = [m for m in parsed if search_lower in m.question.lower()]
         
         # Filter out expired markets
         now = datetime.now().isoformat()

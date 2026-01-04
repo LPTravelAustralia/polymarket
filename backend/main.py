@@ -729,12 +729,26 @@ async def _news_signal(market: MarketResponse) -> Optional[str]:
 
 def _momentum_signal(market: MarketResponse) -> Optional[str]:
     """Pick markets with prices in tradeable range where movement matters"""
-    # Trade markets with prices between 5% and 95% - very wide for demo
-    if market.yes_price < 0.05 or market.yes_price > 0.95:
+    # Skip joke/meme markets that are unpredictable
+    joke_keywords = ['gta vi', 'gta 6', 'jesus christ', 'god', 'alien', 'ufo', 'simulation', 'before gta']
+    question_lower = market.question.lower()
+    if any(kw in question_lower for kw in joke_keywords):
         return None
     
-    # Minimal liquidity requirement for demo
-    if market.liquidity < 100:
+    # Skip markets too close to 50% (no edge, coin flip)
+    if 0.45 <= market.yes_price <= 0.55:
+        return None
+    
+    # Trade markets with prices between 10% and 90% (not extremes)
+    if market.yes_price < 0.10 or market.yes_price > 0.90:
+        return None
+    
+    # Require decent liquidity
+    if market.liquidity < 5000:
+        return None
+    
+    # Require some 24h volume (active market)
+    if (market.volume_24h or 0) < 1000:
         return None
     
     history = app.state.price_history.get(market.id, deque())
@@ -742,25 +756,43 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     # Momentum: if price is rising, go YES; if falling, go NO
     if len(history) >= 2:
         delta = history[-1] - history[-2]
-        if delta > 0.003:  # Price rising
+        if delta > 0.005:  # Price rising significantly
             return "yes"
-        if delta < -0.003:  # Price falling
+        if delta < -0.005:  # Price falling significantly
             return "no"
     
-    # Mean reversion / value bet on first pass
-    if market.yes_price < 0.50:
-        return "yes"  # Below fair value, bet YES
-    else:
-        return "no"  # Above fair value, bet NO
+    # Value bet: look for mispriced markets (not near 50%)
+    # If price is low (10-35%), bet YES (undervalued)
+    if market.yes_price < 0.35:
+        return "yes"
+    # If price is high (65-90%), bet NO (overvalued)
+    elif market.yes_price > 0.65:
+        return "no"
+    
+    return None  # Skip markets without clear signal
 
 
 async def _ai_signal(market: MarketResponse) -> Optional[str]:
     """Use AI (Claude/GPT) to analyze market and generate trading signal"""
+    # Skip joke/meme markets that are unpredictable
+    joke_keywords = ['gta vi', 'gta 6', 'jesus christ', 'god', 'alien', 'ufo', 'simulation', 'before gta', 'second coming']
+    question_lower = market.question.lower()
+    if any(kw in question_lower for kw in joke_keywords):
+        return None
+    
     # Trade markets with prices between 10% and 90%
     if market.yes_price < 0.10 or market.yes_price > 0.90:
         return None
     
-    if market.liquidity < 500:
+    # Skip markets too close to 50% (no clear edge)
+    if 0.45 <= market.yes_price <= 0.55:
+        return None
+    
+    if market.liquidity < 5000:
+        return None
+    
+    # Require some activity
+    if (market.volume_24h or 0) < 1000:
         return None
     
     # Build the prompt

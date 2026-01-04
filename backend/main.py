@@ -795,7 +795,7 @@ No explanation needed, just the action."""
                         "content-type": "application/json"
                     },
                     json={
-                        "model": "claude-3-haiku-20240307",
+                        "model": "claude-sonnet-4-20250514",
                         "max_tokens": 50,
                         "messages": [{"role": "user", "content": prompt}]
                     },

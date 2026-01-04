@@ -1221,33 +1221,7 @@ async def _trading_loop(config: BotConfig):
                 if market.id in app.state.positions:
                     continue
                 
-                # Calculate trade size (Kelly or fixed)
-                if config.use_kelly_sizing:
-                    # For Kelly, we need a probability estimate
-                    # Use a simple momentum-based estimate for now
-                    momentum = _momentum_signal(market)
-                    if momentum == "yes":
-                        predicted_prob = min(0.95, market.yes_price + 0.1)
-                    elif momentum == "no":
-                        predicted_prob = max(0.05, market.yes_price - 0.1)
-                    else:
-                        predicted_prob = market.yes_price
-                    
-                    trade_size = _calculate_kelly_size(config, market, predicted_prob)
-                    if trade_size < 1.0:  # Skip if Kelly size too small
-                        blocked_reasons["kelly_small"] += 1
-                        continue
-                else:
-                    trade_size = config.trade_size
-                
-                if _current_exposure() + trade_size > config.global_cap:
-                    blocked_reasons["global_cap"] += 1
-                    break
-                if _per_market_exposure(market.id) + trade_size > config.per_market_cap:
-                    blocked_reasons["per_market_cap"] += 1
-                    continue
-
-                # Get signal based on selected agent
+                # Get signal FIRST based on selected agent
                 if config.agent == "ai":
                     signal = await _ai_signal(market)
                 elif config.agent == "value":
@@ -1273,7 +1247,30 @@ async def _trading_loop(config: BotConfig):
                     # Simple edge calculation: if we're betting YES at 0.4, we think it should be higher
                     implied_edge = 0.1 if signal == "yes" else 0.1  # Simplified
                     if implied_edge < config.min_edge:
+                        blocked_reasons["min_edge"] += 1
                         continue
+                
+                # Calculate trade size (Kelly or fixed) - AFTER we have a signal
+                if config.use_kelly_sizing:
+                    # Use the signal to estimate predicted probability
+                    if signal == "yes":
+                        predicted_prob = min(0.95, market.yes_price + 0.10)  # Expect YES to win
+                    else:
+                        predicted_prob = max(0.05, market.yes_price - 0.10)  # Expect NO to win
+                    
+                    trade_size = _calculate_kelly_size(config, market, predicted_prob)
+                    if trade_size < 1.0:  # Skip if Kelly size too small
+                        blocked_reasons["kelly_small"] += 1
+                        continue
+                else:
+                    trade_size = config.trade_size
+                
+                if _current_exposure() + trade_size > config.global_cap:
+                    blocked_reasons["global_cap"] += 1
+                    break
+                if _per_market_exposure(market.id) + trade_size > config.per_market_cap:
+                    blocked_reasons["per_market_cap"] += 1
+                    continue
 
                 entry_price = market.yes_price if signal == "yes" else market.no_price
                 position = {

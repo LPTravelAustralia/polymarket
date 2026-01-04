@@ -152,6 +152,130 @@ This document outlines potential features and improvements for the trading bot.
 
 ---
 
+## 🎯 Priority 4: Copy Trading ("Smart Money" Mirror)
+
+> 📘 **Reference:** [PolyCop Documentation](https://polycop.gitbook.io/polycop-docs)
+
+### Overview
+Copy trades from profitable "smart money" wallets on Polymarket by monitoring blockchain transactions in real-time.
+
+### 🔍 Wallet Discovery & Analysis
+- **Effort:** Medium
+- **Description:** Find and evaluate profitable traders
+  - Integrate example wallets (e.g., [@gabagool22](https://polymarket.com/@gabagool22))
+  - Scrape Polymarket leaderboard for top performers
+  - Analyze wallet P&L history via PolygonScan
+  - Filter by minimum profitability threshold
+  - Check if markets have enough liquidity for copying
+  - Identify consistent vs lucky traders (time-weighted performance)
+
+### 🔗 PolygonScan Integration
+- **Effort:** High
+- **Description:** Monitor wallet transactions
+  - Connect to PolygonScan API (free: 5 calls/sec)
+  - Parse ERC-1155 token transactions (Polymarket shares)
+  - Track ERC-20 USDC transfers (trade amounts)
+  - Decode transaction inputs to extract:
+    - Market/outcome being traded
+    - Side (YES/NO)
+    - Amount and price
+    - Limit vs market order
+  - Historical backtest on past wallet trades
+  - Map token IDs to Polymarket markets
+
+### ⚡ Real-Time Copy Engine
+- **Effort:** Very High
+- **Description:** Execute trades automatically
+  - Use Alchemy/Infura RPC for mempool monitoring
+  - WebSocket subscription to target wallet addresses
+  - Decode pending transactions before confirmation
+  - **Limit Order Copying:**
+    - Copy with price offset (buy higher/lower than trader)
+    - Set expiration times for orders
+  - **Market Order Copying:**
+    - Instant replication for speed
+  - **Proportional Sizing:**
+    - Scale position based on trader's size
+    - Use configurable ratio (e.g., 10% of their position)
+  - Gas optimization for fast execution
+  - Handle small trade minimums (skip or execute at min)
+
+### 🛡️ Risk Management for Copy Trading
+- **Effort:** Medium
+- **Description:** Protect against bad trades
+  - Maximum copy amount per single trade
+  - Total position cap per copied wallet
+  - Skip trades below minimum threshold
+  - Slippage protection (reject if price moved too much)
+  - Blacklist low-liquidity or suspicious markets
+  - Circuit breaker if wallet starts losing money
+  - Diversify across multiple wallets
+  - Time delays to avoid front-running accusations
+
+### 📊 Copy Trading Dashboard
+- **Effort:** Medium
+- **Description:** UI for managing copy settings
+  - List of tracked wallets with real-time stats
+  - Enable/disable copying per wallet
+  - Configure copy ratio (% of their trade size)
+  - View copied trades vs original trades
+  - Performance comparison: your copy vs their result
+  - Wallet profitability metrics (30d, 90d, all-time)
+  - Activity log showing copy executions
+
+### 🧠 Advanced Copy Strategies
+- **Effort:** High
+- **Description:** Intelligent copy logic
+  - **Conditional Copying:** Only copy if wallet is currently profitable
+  - **Time-Weighted:** Weight recent performance higher
+  - **Category-Specific:** Only copy politics bets, skip sports
+  - **Inverse Copying:** Fade consistently losing wallets
+  - **Multi-Wallet Portfolio:** Diversify across 5-10 top traders
+  - **Confidence-Based:** Copy larger amounts on high-conviction trades
+  - **Stop-Copy:** Auto-disable wallet after X consecutive losses
+
+### Technical Requirements
+```bash
+# New API Keys Needed
+POLYGONSCAN_API_KEY=ABC123...      # Free tier: 5 calls/sec
+ALCHEMY_API_KEY=alch_xyz...        # Free tier: 300M compute units/month
+# OR
+INFURA_API_KEY=abc123...           # Free tier: 100k requests/day
+
+# Config
+COPY_ENABLED=true
+COPY_WALLETS=0xABC...,0xDEF...     # Comma-separated addresses
+COPY_RATIO=0.1                     # Copy 10% of their size
+COPY_MAX_PER_TRADE=100             # Max $100 per copied trade
+COPY_MIN_TRADE=5                   # Skip trades under $5
+```
+
+### Implementation Steps
+1. **Phase 1:** Historical analysis (PolygonScan API)
+   - Fetch past trades from target wallet
+   - Backtest: calculate what P&L would have been if copied
+   - Validate wallet is worth copying
+2. **Phase 2:** Real-time monitoring (Alchemy WebSocket)
+   - Subscribe to mempool for new pending txs
+   - Decode and identify Polymarket trades
+3. **Phase 3:** Execution engine
+   - Replicate trades via Polymarket API
+   - Handle errors, retries, gas estimation
+4. **Phase 4:** UI & controls
+   - Dashboard to manage wallets and view copy activity
+
+### Example Wallets to Copy
+- [@gabagool22](https://polymarket.com/@gabagool22) - Suggested in chat
+- Find more: Polymarket leaderboard, Twitter recommendations, top holders
+
+### Resources
+- [PolyCop Docs](https://polycop.gitbook.io/polycop-docs) - Telegram bot doing similar
+- [PolygonScan API Docs](https://docs.polygonscan.com)
+- [Alchemy Docs](https://docs.alchemy.com/reference/api-overview)
+- Polymarket contracts: Verify addresses on PolygonScan
+
+---
+
 ## How to Contribute
 
 1. Pick a feature from this roadmap

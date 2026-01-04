@@ -34,7 +34,13 @@ See [SETUP_REFERENCE.md](SETUP_REFERENCE.md) for detailed deployment info and TO
   - AI-powered predictions using GPT-4 or Claude
   - News sentiment analysis
 
-- 💰 **Fee Collection System**
+- � **Copy Trading (Planned)**
+  - Mirror trades from profitable "smart money" wallets
+  - Real-time transaction monitoring via PolygonScan
+  - Proportional position sizing
+  - Risk controls and filters
+
+- �💰 **Fee Collection System**
   - Configurable performance-based fees
   - Automatic fee calculation on profitable trades
   - Fee wallet management
@@ -99,6 +105,45 @@ polymarket/
 - OpenAI or Anthropic API key (for AI agent)
 
 ### Setup
+
+### Environment Variables
+
+Create a `.env` file in the root directory:
+
+```bash
+# Required API Keys
+POLYMARKET_API_KEY=your_gamma_api_key_here
+
+# Optional: AI Analysis
+ANTHROPIC_API_KEY=sk-ant-api03-...  # For Claude AI predictions
+OPENAI_API_KEY=sk-...                # Alternative: GPT-4
+
+# Optional: Copy Trading
+POLYGONSCAN_API_KEY=your_key_here    # Analyze wallet transactions
+ALCHEMY_API_KEY=your_key_here        # Real-time blockchain access
+# OR
+INFURA_API_KEY=your_key_here         # Alternative to Alchemy
+
+# Optional: News Analysis
+NEWSAPI_KEY=your_key_here            # News sentiment analysis
+
+# Trading Configuration
+DRY_RUN=true                         # Paper trading mode
+```
+
+### API Key Sources
+
+| Service | Purpose | Get Key | Cost |
+|---------|---------|---------|------|
+| Polymarket Gamma | Market data & trading | [docs.polymarket.com](https://docs.polymarket.com) | Free tier |
+| Anthropic Claude | AI predictions | [console.anthropic.com](https://console.anthropic.com) | ~$0.01-0.05/analysis |
+| OpenAI GPT-4 | Alternative AI | [platform.openai.com](https://platform.openai.com) | Similar to Claude |
+| PolygonScan | Wallet analysis | [polygonscan.com/apis](https://polygonscan.com/apis) | Free: 5 calls/sec |
+| Alchemy | Blockchain RPC | [alchemy.com](https://alchemy.com) | Free tier available |
+| Infura | Alternative RPC | [infura.io](https://infura.io) | Free tier available |
+| NewsAPI | News sentiment | [newsapi.org](https://newsapi.org) | Free: 100/day |
+
+### Installation
 
 1. **Clone the repository**
    ```bash

@@ -32,14 +32,15 @@ A comprehensive, production-ready Polymarket trading bot with AI predictions, mu
 3. **run_arbitrage_bot.py** - Arbitrage scanner
 4. **run_ai_bot.py** - AI-powered trading
 
-### Documentation (6 comprehensive guides)
+### Documentation (7 comprehensive guides)
 
-1. **README.md** - Main documentation (8,500+ words)
+1. **README.md** - Main documentation (with API keys & copy trading)
 2. **QUICKSTART.md** - 5-minute setup guide
 3. **ARCHITECTURE.md** - Technical details
 4. **API.md** - Complete API reference
 5. **FEE_COLLECTION_GUIDE.md** - Monetization guide
 6. **EXAMPLES.md** - Practical code examples
+7. **COPY_TRADING.md** - Smart money mirroring guide (NEW)
 
 ### Testing & Quality
 

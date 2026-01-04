@@ -788,8 +788,8 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     if 0.45 <= market.yes_price <= 0.55:
         return None
     
-    # Trade markets with prices between 10% and 90% (not extremes)
-    if market.yes_price < 0.10 or market.yes_price > 0.90:
+    # Trade markets with prices between 5% and 95% (match _passes_filters)
+    if market.yes_price < 0.05 or market.yes_price > 0.95:
         return None
     
     # Require decent liquidity
@@ -811,11 +811,11 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
             return "no"
     
     # Value bet: look for mispriced markets (not near 50%)
-    # If price is low (10-35%), bet YES (undervalued)
-    if market.yes_price < 0.35:
+    # If price is low (5-30%), bet YES (undervalued)
+    if market.yes_price < 0.30:
         return "yes"
-    # If price is high (65-90%), bet NO (overvalued)
-    elif market.yes_price > 0.65:
+    # If price is high (70-95%), bet NO (overvalued)
+    elif market.yes_price > 0.70:
         return "no"
     
     return None  # Skip markets without clear signal

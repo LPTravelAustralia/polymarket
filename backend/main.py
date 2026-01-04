@@ -1213,6 +1213,8 @@ async def _trading_loop(config: BotConfig):
 
             # Consider new trades - iterate all markets to find tradeable ones
             trades_opened = 0
+            signals_found = 0
+            blocked_reasons = {"no_signal": 0, "kelly_small": 0, "global_cap": 0, "per_market_cap": 0, "min_edge": 0}
             for market in parsed_markets.values():
                 if trades_opened >= config.max_markets:
                     break
@@ -1233,13 +1235,16 @@ async def _trading_loop(config: BotConfig):
                     
                     trade_size = _calculate_kelly_size(config, market, predicted_prob)
                     if trade_size < 1.0:  # Skip if Kelly size too small
+                        blocked_reasons["kelly_small"] += 1
                         continue
                 else:
                     trade_size = config.trade_size
                 
                 if _current_exposure() + trade_size > config.global_cap:
+                    blocked_reasons["global_cap"] += 1
                     break
                 if _per_market_exposure(market.id) + trade_size > config.per_market_cap:
+                    blocked_reasons["per_market_cap"] += 1
                     continue
 
                 # Get signal based on selected agent
@@ -1257,7 +1262,10 @@ async def _trading_loop(config: BotConfig):
                     signal = _momentum_signal(market)
                     
                 if not signal:
+                    blocked_reasons["no_signal"] += 1
                     continue
+                
+                signals_found += 1
                 
                 # Check minimum edge requirement
                 if config.min_edge > 0:
@@ -1306,6 +1314,12 @@ async def _trading_loop(config: BotConfig):
                     "trade": trade,
                     "position": position,
                 })
+
+            # Debug: Log why no trades if signals were checked
+            if trades_opened == 0 and signals_found == 0:
+                blocking = [f"{k}:{v}" for k, v in blocked_reasons.items() if v > 0]
+                if blocking:
+                    add_activity(f"⚠️ No trades: {', '.join(blocking)} (from {len(parsed_markets)} markets)")
 
             # Record equity snapshot for charting
             app.state.equity_history.append({

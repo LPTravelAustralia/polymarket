@@ -186,6 +186,29 @@ class GammaMarketClient:
             logger.error(f"Error fetching market {market_id}: {e}")
             return None
     
+    def get_market_by_condition_id(self, condition_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get specific market by conditionId (the 0x... hex string)
+        
+        Args:
+            condition_id: The conditionId (e.g., 0x17815081...)
+            
+        Returns:
+            Market data dictionary or None
+        """
+        try:
+            # Query by conditionId parameter
+            params = {"conditionId": condition_id}
+            response = httpx.get(self.gamma_markets_endpoint, params=params, timeout=30)
+            if response.status_code == 200:
+                markets = response.json()
+                if markets and len(markets) > 0:
+                    return markets[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching market by conditionId {condition_id}: {e}")
+            return None
+    
     def get_event(self, event_id: int) -> Optional[Dict[str, Any]]:
         """
         Get specific event by ID

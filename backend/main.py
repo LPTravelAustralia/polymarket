@@ -1534,23 +1534,24 @@ async def get_selectable_markets(
 async def get_market(market_id: str):
     """Get a specific market by ID"""
     try:
-        # First search in cached markets (fast, has 5000+ markets)
+        # First search in cached markets (fast)
         cached_markets = getattr(app.state, 'all_markets_cache', []) or []
         for m in cached_markets:
             if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
                 return parse_market(m)
         
-        # Try to get market by ID directly from Gamma API
+        # If not in cache and looks like a conditionId (0x...), fetch directly
+        if market_id.startswith("0x"):
+            market = app.state.gamma_client.get_market_by_condition_id(market_id)
+            if market:
+                return parse_market(market)
+        
+        # Try to get market by numeric ID directly from Gamma API
         if market_id.isdigit():
             market = app.state.gamma_client.get_market(int(market_id))
             if market:
                 return parse_market(market)
         
-        # Last resort: fetch directly from API
-        markets = app.state.gamma_client.get_current_markets(limit=500)
-        for m in markets:
-            if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
-                return parse_market(m)
         raise HTTPException(status_code=404, detail="Market not found")
     except HTTPException:
         raise
@@ -2037,7 +2038,7 @@ async def quick_trade(request: QuickTradeRequest):
     if market_id in app.state.positions:
         raise HTTPException(status_code=400, detail="Already have a position in this market")
     
-    # Get market data - use cache first (has 5000+ markets)
+    # Get market data - try cache first, then direct API lookup
     market = None
     cached_markets = getattr(app.state, 'all_markets_cache', []) or []
     for m in cached_markets:
@@ -2045,13 +2046,17 @@ async def quick_trade(request: QuickTradeRequest):
             market = parse_market(m)
             break
     
-    # Fall back to direct API call if not in cache
-    if not market:
-        markets = app.state.gamma_client.get_current_markets(limit=500)
-        for m in markets:
-            if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
-                market = parse_market(m)
-                break
+    # If not in cache and looks like a conditionId (0x...), fetch directly
+    if not market and market_id.startswith("0x"):
+        raw = app.state.gamma_client.get_market_by_condition_id(market_id)
+        if raw:
+            market = parse_market(raw)
+    
+    # If still not found and is numeric, try by ID
+    if not market and market_id.isdigit():
+        raw = app.state.gamma_client.get_market(int(market_id))
+        if raw:
+            market = parse_market(raw)
     
     if not market:
         raise HTTPException(status_code=404, detail="Market not found")
@@ -2108,10 +2113,10 @@ async def quick_trade(request: QuickTradeRequest):
 async def analyze_market(market_id: str):
     """Analyze a market using AI (demo mode)"""
     try:
-        # Get market - try cache first (has 5000+ markets), then fall back to API
+        # Get market - try cache first, then direct API lookup
         market = None
         
-        # First search in cached markets (fast, has more markets)
+        # First search in cached markets (fast)
         cached_markets = getattr(app.state, 'all_markets_cache', []) or []
         for m in cached_markets:
             # Check both conditionId and id fields
@@ -2119,17 +2124,13 @@ async def analyze_market(market_id: str):
                 market = m
                 break
         
-        # If not in cache, try to get by numeric ID from Gamma API
+        # If not in cache and looks like a conditionId (0x...), fetch directly by conditionId
+        if not market and market_id.startswith("0x"):
+            market = app.state.gamma_client.get_market_by_condition_id(market_id)
+        
+        # If still not found and is numeric, try by ID
         if not market and market_id.isdigit():
             market = app.state.gamma_client.get_market(int(market_id))
-        
-        # Last resort: fetch directly from API
-        if not market:
-            markets = app.state.gamma_client.get_current_markets(limit=500)
-            for m in markets:
-                if m.get("conditionId") == market_id or str(m.get("id")) == market_id:
-                    market = m
-                    break
         
         if not market:
             raise HTTPException(status_code=404, detail="Market not found")

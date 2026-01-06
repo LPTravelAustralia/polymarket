@@ -869,16 +869,23 @@ async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]
 
             if probability is not None:
                 edge = probability - market.yes_price
-                min_edge = max(config.min_edge, 0.03)
+                # Use lower threshold for Superforecaster (we have TP/SL protection)
+                min_edge = max(config.min_edge * 0.75, 0.015)
 
-                if abs(edge) >= min_edge and confidence != "LOW":
+                # Accept all confidence levels - Superforecaster is sophisticated enough
+                if abs(edge) >= min_edge:
                     direction = "yes" if edge > 0 else "no"
                     add_activity(
-                        f"🧠 Superforecaster: {probability:.2f} vs {market.yes_price:.2f} (edge {edge:+.2f}) → {direction.upper()}"
+                        f"🧠 Superforecaster [{confidence}]: {probability:.2f} vs {market.yes_price:.2f} (edge {edge:+.2f}) → {direction.upper()}"
                     )
                     return direction
+                else:
+                    # Log why we skipped it
+                    add_activity(f"🔍 SF skip: edge {edge:+.3f} < {min_edge:.3f} on {market.question[:30]}...")
         except Exception as exc:
             add_activity(f"⚠️ Superforecaster error: {str(exc)[:80]}")
+    else:
+        add_activity("⚠️ Superforecaster agent not initialized - check ANTHROPIC_API_KEY")
 
     # Build the lightweight classification prompt (kept short for speed)
     prompt = f"""You are an expert prediction market trader. Decide whether to bet YES or NO.

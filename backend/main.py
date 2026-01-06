@@ -32,6 +32,10 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 SUPER_AGENT: Optional[SuperforecasterAgent] = None
 
+# Log API key status at startup
+import sys
+print(f"🔑 Startup: ANTHROPIC_KEY={'✓ present' if ANTHROPIC_API_KEY else '✗ missing'}, OPENAI_KEY={'✓ present' if OPENAI_API_KEY else '✗ missing'}", flush=True, file=sys.stderr)
+
 # ============================================================================
 # SQLite Persistence
 # ============================================================================
@@ -504,10 +508,11 @@ def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
     openai_key = os.getenv("OPENAI_API_KEY", "")
     
-    print(f"🔍 Superforecaster init: ANTHROPIC_KEY={'present' if anthropic_key else 'missing'}, OPENAI_KEY={'present' if openai_key else 'missing'}")
+    print(f"🔍 Superforecaster init: ANTHROPIC_KEY={'present' if anthropic_key else 'missing'}, OPENAI_KEY={'present' if openai_key else 'missing'}", flush=True, file=sys.stderr)
 
     # Prefer Anthropic/Claude, fallback to OpenAI
     if not anthropic_key and not openai_key:
+        print("❌ No API keys found for Superforecaster", flush=True, file=sys.stderr)
         return None
 
     try:
@@ -519,7 +524,7 @@ def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
         
         # Choose model based on available key
         model = ANTHROPIC_MODEL if anthropic_key else OPENAI_MODEL
-        print(f"🚀 Initializing Superforecaster with model: {model}")
+        print(f"🚀 Initializing Superforecaster with model: {model}", flush=True, file=sys.stderr)
         
         SUPER_AGENT = SuperforecasterAgent(
             cfg,
@@ -527,12 +532,12 @@ def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
             use_news=False,
             use_search=False,
         )
-        print(f"✅ Superforecaster initialized successfully")
+        print(f"✅ Superforecaster initialized successfully", flush=True, file=sys.stderr)
         return SUPER_AGENT
     except Exception as exc:
-        print(f"❌ Could not initialize SuperforecasterAgent: {exc}")
+        print(f"❌ Could not initialize SuperforecasterAgent: {exc}", flush=True, file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         return None
         SUPER_AGENT = None
         return None

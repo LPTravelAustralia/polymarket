@@ -877,9 +877,12 @@ async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]
 
     # Use the Superforecaster agent first when an OpenAI key is configured
     agent = _get_superforecaster_agent()
+    print(f"📊 _ai_signal called for: {market.question[:50]}... | agent={'exists' if agent else 'None'}", flush=True, file=sys.stderr)
     if agent:
         try:
+            print(f"🔄 Calling Superforecaster.quick_analyze...", flush=True, file=sys.stderr)
             result = await asyncio.to_thread(agent.quick_analyze, market.question, market.yes_price)
+            print(f"📥 SF result: {result}", flush=True, file=sys.stderr)
             probability = result.get("probability")
             confidence = (result.get("confidence") or "").upper()
 
@@ -893,6 +896,13 @@ async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]
                     direction = "yes" if edge > 0 else "no"
                     add_activity(
                         f"🧠 Superforecaster [{confidence}]: {probability:.2f} vs {market.yes_price:.2f} (edge {edge:+.2f}) → {direction.upper()}"
+                    )
+                    return direction
+                else:
+                    # Log why we skipped it
+                    add_activity(f"🔍 SF skip: edge {edge:+.3f} < {min_edge:.3f} on {market.question[:30]}...")
+            else:
+                print(f"⚠️ SF returned no probability", flush=True, file=sys.stderr)
                     )
                     return direction
                 else:

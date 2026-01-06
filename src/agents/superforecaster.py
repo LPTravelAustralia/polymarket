@@ -9,6 +9,7 @@ from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 
 from src.core.config import Config
 
@@ -269,16 +270,25 @@ class SuperforecasterAgent:
         self.use_news = use_news
         self.use_search = use_search
         
-        # Initialize LLM
-        if config.openai_api_key:
+        # Initialize LLM: prefer Anthropic, fallback to OpenAI
+        if config.anthropic_api_key:
+            self.llm = ChatAnthropic(
+                model=model,
+                temperature=0.1,
+                api_key=config.anthropic_api_key,
+                max_tokens=256,
+            )
+            logger.info(f"Superforecaster using Anthropic model: {model}")
+        elif config.openai_api_key:
             self.llm = ChatOpenAI(
                 model=model,
                 temperature=0.1,  # Low temperature for consistent predictions
                 api_key=config.openai_api_key
             )
+            logger.info(f"Superforecaster using OpenAI model: {model}")
         else:
             self.llm = None
-            logger.warning("No OpenAI API key - AI predictions disabled")
+            logger.warning("No AI API key - Superforecaster disabled")
         
         # Initialize connectors
         self.news_connector = None

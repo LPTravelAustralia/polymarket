@@ -500,19 +500,26 @@ def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
     if SUPER_AGENT:
         return SUPER_AGENT
 
+    # Re-read environment variables in case they changed
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    
+    print(f"🔍 Superforecaster init: ANTHROPIC_KEY={'present' if anthropic_key else 'missing'}, OPENAI_KEY={'present' if openai_key else 'missing'}")
+
     # Prefer Anthropic/Claude, fallback to OpenAI
-    if not ANTHROPIC_API_KEY and not OPENAI_API_KEY:
+    if not anthropic_key and not openai_key:
         return None
 
     try:
         cfg = load_config()
         # Set the API keys from environment
-        cfg.anthropic_api_key = ANTHROPIC_API_KEY or cfg.anthropic_api_key
-        cfg.openai_api_key = OPENAI_API_KEY or cfg.openai_api_key
+        cfg.anthropic_api_key = anthropic_key or cfg.anthropic_api_key
+        cfg.openai_api_key = openai_key or cfg.openai_api_key
         cfg.use_ai_predictions = True
         
         # Choose model based on available key
-        model = ANTHROPIC_MODEL if ANTHROPIC_API_KEY else OPENAI_MODEL
+        model = ANTHROPIC_MODEL if anthropic_key else OPENAI_MODEL
+        print(f"🚀 Initializing Superforecaster with model: {model}")
         
         SUPER_AGENT = SuperforecasterAgent(
             cfg,
@@ -520,9 +527,13 @@ def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
             use_news=False,
             use_search=False,
         )
+        print(f"✅ Superforecaster initialized successfully")
         return SUPER_AGENT
     except Exception as exc:
         print(f"❌ Could not initialize SuperforecasterAgent: {exc}")
+        import traceback
+        traceback.print_exc()
+        return None
         SUPER_AGENT = None
         return None
 

@@ -28,6 +28,7 @@ from src.agents.superforecaster import SuperforecasterAgent
 # AI API keys from environment
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 SUPER_AGENT: Optional[SuperforecasterAgent] = None
 
@@ -499,22 +500,28 @@ def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
     if SUPER_AGENT:
         return SUPER_AGENT
 
-    if not OPENAI_API_KEY:
+    # Prefer Anthropic/Claude, fallback to OpenAI
+    if not ANTHROPIC_API_KEY and not OPENAI_API_KEY:
         return None
 
     try:
         cfg = load_config()
-        # Ensure the API key is set even if the .env is missing in backend container
+        # Set the API keys from environment
+        cfg.anthropic_api_key = ANTHROPIC_API_KEY or cfg.anthropic_api_key
         cfg.openai_api_key = OPENAI_API_KEY or cfg.openai_api_key
         cfg.use_ai_predictions = True
+        
+        # Choose model based on available key
+        model = ANTHROPIC_MODEL if ANTHROPIC_API_KEY else OPENAI_MODEL
+        
         SUPER_AGENT = SuperforecasterAgent(
             cfg,
-            model=OPENAI_MODEL,
+            model=model,
             use_news=False,
             use_search=False,
         )
         return SUPER_AGENT
-    except Exception as exc:  # pragma: no cover - defensive logging
+    except Exception as exc:
         print(f"❌ Could not initialize SuperforecasterAgent: {exc}")
         SUPER_AGENT = None
         return None

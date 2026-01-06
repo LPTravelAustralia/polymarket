@@ -23,10 +23,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.gamma_client import GammaMarketClient
 from src.core.config import load_config
+from src.agents.superforecaster import SuperforecasterAgent
 
 # AI API keys from environment
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+SUPER_AGENT: Optional[SuperforecasterAgent] = None
 
 # ============================================================================
 # SQLite Persistence
@@ -489,6 +492,34 @@ def add_activity(message: str):
     app.state.activity_log = app.state.activity_log[:100]  # Keep last 100
 
 
+def _get_superforecaster_agent() -> Optional[SuperforecasterAgent]:
+    """Lazily initialize and cache the Superforecaster agent for AI signals."""
+    global SUPER_AGENT
+
+    if SUPER_AGENT:
+        return SUPER_AGENT
+
+    if not OPENAI_API_KEY:
+        return None
+
+    try:
+        cfg = load_config()
+        # Ensure the API key is set even if the .env is missing in backend container
+        cfg.openai_api_key = OPENAI_API_KEY or cfg.openai_api_key
+        cfg.use_ai_predictions = True
+        SUPER_AGENT = SuperforecasterAgent(
+            cfg,
+            model=OPENAI_MODEL,
+            use_news=False,
+            use_search=False,
+        )
+        return SUPER_AGENT
+    except Exception as exc:  # pragma: no cover - defensive logging
+        print(f"❌ Could not initialize SuperforecasterAgent: {exc}")
+        SUPER_AGENT = None
+        return None
+
+
 def calculate_stats(closed_trades: List[Dict[str, Any]]) -> TradingStats:
     """Calculate trading statistics from closed trades"""
     if not closed_trades:
@@ -812,48 +843,48 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     return None  # Skip markets without clear signal
 
 
-async def _ai_signal(market: MarketResponse) -> Optional[str]:
+async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]:
     """Use AI (Claude/GPT) to analyze market and generate trading signal"""
-    # Skip joke/meme markets that are unpredictable
+    # Skip obvious noise markets that aren't predictable
     joke_keywords = ['gta vi', 'gta 6', 'jesus christ', 'god', 'alien', 'ufo', 'simulation', 'before gta', 'second coming']
     question_lower = market.question.lower()
     if any(kw in question_lower for kw in joke_keywords):
         return None
-    
-    # Trade markets with prices between 10% and 90%
-    if market.yes_price < 0.10 or market.yes_price > 0.90:
-        return None
-    
-    # Skip markets too close to 50% (no clear edge)
-    if 0.45 <= market.yes_price <= 0.55:
-        return None
-    
-    if market.liquidity < 5000:
-        return None
-    
-    # Require some activity
-    if (market.volume_24h or 0) < 1000:
-        return None
-    
-    # Build the prompt
-    prompt = f"""You are an expert prediction market trader. Analyze this market and decide whether to bet YES or NO.
+
+    # Use the Superforecaster agent first when an OpenAI key is configured
+    agent = _get_superforecaster_agent()
+    if agent:
+        try:
+            result = await asyncio.to_thread(agent.quick_analyze, market.question, market.yes_price)
+            probability = result.get("probability")
+            confidence = (result.get("confidence") or "").upper()
+
+            if probability is not None:
+                edge = probability - market.yes_price
+                min_edge = max(config.min_edge, 0.03)
+
+                if abs(edge) >= min_edge and confidence != "LOW":
+                    direction = "yes" if edge > 0 else "no"
+                    add_activity(
+                        f"🧠 Superforecaster: {probability:.2f} vs {market.yes_price:.2f} (edge {edge:+.2f}) → {direction.upper()}"
+                    )
+                    return direction
+        except Exception as exc:
+            add_activity(f"⚠️ Superforecaster error: {str(exc)[:80]}")
+
+    # Build the lightweight classification prompt (kept short for speed)
+    prompt = f"""You are an expert prediction market trader. Decide whether to bet YES or NO.
 
 MARKET: {market.question}
 CURRENT YES PRICE: {market.yes_price:.2%} (${market.yes_price:.2f})
 CURRENT NO PRICE: {market.no_price:.2%} (${market.no_price:.2f})
 LIQUIDITY: ${market.liquidity:,.0f}
 
-Consider:
-1. Is the current price fair based on available information?
-2. What is your estimated probability this resolves YES?
-3. Is there edge (difference between your estimate and market price)?
+If your estimated YES probability is higher than price by at least {config.min_edge:.0%}, respond with BUY_YES.
+If it is lower by that margin, respond with BUY_NO.
+Otherwise respond with HOLD.
 
-If you believe YES is underpriced (your probability > market price), respond with: BUY_YES
-If you believe NO is underpriced (your probability < market price), respond with: BUY_NO
-If no clear edge, respond with: HOLD
-
-Respond with ONLY one of: BUY_YES, BUY_NO, or HOLD
-No explanation needed, just the action."""
+Reply with only BUY_YES, BUY_NO, or HOLD."""
 
     try:
         # Try Anthropic first
@@ -879,10 +910,9 @@ No explanation needed, just the action."""
                     add_activity(f"🤖 AI analyzed: {market.question[:40]}... → {text}")
                     if "BUY_YES" in text:
                         return "yes"
-                    elif "BUY_NO" in text:
+                    if "BUY_NO" in text:
                         return "no"
-                    return None
-        
+
         # Fallback to OpenAI
         if OPENAI_API_KEY:
             async with httpx.AsyncClient() as client:
@@ -905,14 +935,12 @@ No explanation needed, just the action."""
                     add_activity(f"🤖 AI analyzed: {market.question[:40]}... → {text}")
                     if "BUY_YES" in text:
                         return "yes"
-                    elif "BUY_NO" in text:
+                    if "BUY_NO" in text:
                         return "no"
-                    return None
-        
-        # No AI available, fall back to momentum
-        add_activity("⚠️ No AI API key configured, using momentum signal")
+
+        # No decisive AI signal - fall back to deterministic momentum so the bot can still trade
         return _momentum_signal(market)
-        
+
     except Exception as e:
         add_activity(f"⚠️ AI error: {str(e)[:50]}")
         return _momentum_signal(market)
@@ -1223,7 +1251,7 @@ async def _trading_loop(config: BotConfig):
                 
                 # Get signal FIRST based on selected agent
                 if config.agent == "ai":
-                    signal = await _ai_signal(market)
+                    signal = await _ai_signal(market, config)
                 elif config.agent == "value":
                     signal = _value_signal(market)
                 elif config.agent == "arbitrage":

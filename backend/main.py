@@ -903,11 +903,6 @@ async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]
                     add_activity(f"🔍 SF skip: edge {edge:+.3f} < {min_edge:.3f} on {market.question[:30]}...")
             else:
                 print(f"⚠️ SF returned no probability", flush=True, file=sys.stderr)
-                    )
-                    return direction
-                else:
-                    # Log why we skipped it
-                    add_activity(f"🔍 SF skip: edge {edge:+.3f} < {min_edge:.3f} on {market.question[:30]}...")
         except Exception as exc:
             add_activity(f"⚠️ Superforecaster error: {str(exc)[:80]}")
     else:

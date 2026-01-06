@@ -814,9 +814,10 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     question_lower = market.question.lower()
     if any(kw in question_lower for kw in joke_keywords):
         return None
-    
-    # Skip markets too close to 50% (no edge, coin flip)
-    if 0.45 <= market.yes_price <= 0.55:
+
+    # Allow a wider band so we can trade more than just extreme prices
+    # Only skip if the price is extremely balanced
+    if 0.48 <= market.yes_price <= 0.52:
         return None
     
     # Note: Price range, liquidity, and volume filters are already applied by _passes_filters
@@ -827,9 +828,9 @@ def _momentum_signal(market: MarketResponse) -> Optional[str]:
     # Momentum: if price is rising, go YES; if falling, go NO
     if len(history) >= 2:
         delta = history[-1] - history[-2]
-        if delta > 0.005:  # Price rising significantly
+        if delta > 0.002:  # Slightly lower threshold to generate signals
             return "yes"
-        if delta < -0.005:  # Price falling significantly
+        if delta < -0.002:  # Slightly lower threshold to generate signals
             return "no"
     
     # Value bet: look for mispriced markets (not near 50%)

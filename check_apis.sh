@@ -7,12 +7,22 @@ echo "  Polymarket Trading Bot - API Connection Quick Test"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
-# Load environment
-if [ -f ~/.env ]; then
-    export $(cat ~/.env | grep -v '^#' | xargs)
-    echo "✓ Loaded .env configuration"
+# Load environment - check current directory first, then home
+ENV_FILE=""
+if [ -f .env ]; then
+    ENV_FILE=".env"
+elif [ -f ~/.env ]; then
+    ENV_FILE="~/.env"
+elif [ -f /home/hello/polymarket/.env ]; then
+    ENV_FILE="/home/hello/polymarket/.env"
+fi
+
+if [ ! -z "$ENV_FILE" ]; then
+    export $(cat "$ENV_FILE" | grep -v '^#' | xargs)
+    echo "✓ Loaded .env configuration from $ENV_FILE"
 else
-    echo "✗ No .env file found at ~/.env"
+    echo "✗ No .env file found"
+    echo "  Checked: ./.env, ~/.env, /home/hello/polymarket/.env"
     exit 1
 fi
 

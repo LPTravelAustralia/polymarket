@@ -8,7 +8,7 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Frontend (Netlify) | ✅ Live | https://boisterous-basbousa-e11b8a.netlify.app/ |
-| Backend (GCloud VM) | ✅ Running | http://136.114.57.247:8000 |
+| Backend (GCloud VM) | ✅ Running | http://34.29.163.176:8000 |
 | API Connection | ✅ Working | Frontend → Backend via Netlify proxy |
 | Polymarket API | ✅ Working | Fetching live market data |
 | Bot Start/Stop | ✅ Working | Via UI or curl |
@@ -53,9 +53,9 @@
                               ▼ (API calls via /api/* proxy)
 ┌─────────────────────────────────────────────────────────────┐
 │  BACKEND (Google Cloud VM)                                  │
-│  External IP: 136.114.57.247                                │
+│  External IP: 34.29.163.176                                 │
 │  Port: 8000                                                 │
-│  URL: http://136.114.57.247:8000                            │
+│  URL: http://34.29.163.176:8000                             │
 │  SSH: hello@polymarket-bot (us-central1-a)                  │
 │  Source: /backend                                           │
 └─────────────────────────────────────────────────────────────┘
@@ -104,7 +104,7 @@ This project uses **remote deployment only** - NOT local development servers.
 
 ### Architecture Reminder
 - **Frontend**: Hosted on Netlify (auto-deploys on git push)
-- **Backend**: Hosted on GCloud VM at `136.114.57.247:8000`
+- **Backend**: Hosted on GCloud VM at `34.29.163.176:8000`
 - **API Proxy**: Netlify proxies `/api/*` requests to the GCloud backend
 
 ---
@@ -126,7 +126,7 @@ The frontend is a **Next.js React app** in the `/frontend` directory.
    - Search for `@netlify/plugin-nextjs` and install it
 5. **Set Environment Variable** (optional):
    - Go to **Environment variables**
-   - Add: `NEXT_PUBLIC_API_URL` = `http://136.114.57.247:8000` (or leave empty for proxy)
+   - Add: `NEXT_PUBLIC_API_URL` = `http://34.29.163.176:8000` (or leave empty for proxy)
 6. **Deploy** → Trigger deploy
 
 ### Netlify Build Settings Summary
@@ -205,13 +205,13 @@ sudo systemctl status polymarket-bot
 ### Quick Test Commands (run from anywhere)
 ```bash
 # Test backend health
-curl http://136.114.57.247:8000/api/status
+curl http://34.29.163.176:8000/api/status
 
 # Test events endpoint
-curl "http://136.114.57.247:8000/api/events?limit=2"
+curl "http://34.29.163.176:8000/api/events?limit=2"
 
 # Test analyze endpoint
-curl -X POST "http://136.114.57.247:8000/api/analyze/553883"
+curl -X POST "http://34.29.163.176:8000/api/analyze/553883"
 ```
 
 ---
@@ -229,21 +229,21 @@ sudo journalctl -u polymarket-bot -n 50
 
 ```bash
 # Health check
-curl http://136.114.57.247:8000/api/status
+curl http://34.29.163.176:8000/api/status
 
 # Get selectable markets for trading
-curl "http://136.114.57.247:8000/api/selectable-markets?category=crypto&limit=10"
+curl "http://34.29.163.176:8000/api/selectable-markets?category=crypto&limit=10"
 
 # Start bot with specific settings
-curl -X POST http://136.114.57.247:8000/api/bot/start \
+curl -X POST http://34.29.163.176:8000/api/bot/start \
   -H "Content-Type: application/json" \
   -d '{"agent":"value","categories":["crypto"],"trade_size":25}'
 
 # Stop bot
-curl -X POST http://136.114.57.247:8000/api/bot/stop
+curl -X POST http://34.29.163.176:8000/api/bot/stop
 
 # View activity log
-curl http://136.114.57.247:8000/api/activity
+curl http://34.29.163.176:8000/api/activity
 ```
 
 ---
@@ -254,7 +254,7 @@ curl http://136.114.57.247:8000/api/activity
 - **Zone:** us-central1-a
 - **Instance:** polymarket-bot
 - **Machine Type:** e2-micro (free tier)
-- **External IP:** 136.114.57.247
+- **External IP:** 34.29.163.176
 - **SSH User:** hello
 
 ### SSH Access

@@ -59,6 +59,12 @@ class Config(BaseSettings):
     monitoring_interval: int = Field(default=60)
     max_concurrent_trades: int = Field(default=5)
 
+    # AI Tuning
+    ai_min_confidence: float = Field(default=0.8)
+    ai_min_edge: float = Field(default=0.15)
+    ai_max_spread_pct: float = Field(default=3.0)
+    calibration_log_path: str = Field(default="calibration_logs/ai_calibration.csv")
+
 
 def load_config() -> Config:
     """Load and return configuration"""

@@ -6,7 +6,7 @@ A comprehensive Python-based trading bot for Polymarket with AI-powered predicti
 
 **Frontend:** https://boisterous-basbousa-e11b8a.netlify.app/
 
-**Backend API:** http://136.114.57.247:8000/docs
+**Backend API:** http://34.29.163.176:8000/docs
 
 The bot is currently running in **paper trading mode** (simulated trades, no real money).
 

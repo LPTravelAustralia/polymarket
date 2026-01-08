@@ -2,6 +2,8 @@
 AI-powered prediction agent using LLMs
 """
 import logging
+import os
+from datetime import datetime
 from typing import Dict, Optional, Any
 import json
 
@@ -65,19 +67,28 @@ class AIAgent(BaseAgent):
         for token in tokens:
             token_id = token.get("token_id")
             depth = self.monitor.analyze_market_depth(token_id)
+            spread_pct = depth.get("spread_percentage") or 0
             
             analysis["tokens"].append({
                 "token_id": token_id,
                 "outcome": token.get("outcome"),
                 "market_price": depth.get("best_ask"),
                 "best_bid": depth.get("best_bid"),
-                "best_ask": depth.get("best_ask")
+                "best_ask": depth.get("best_ask"),
+                "spread_pct": spread_pct
             })
         
         # Get AI prediction if enabled
         if self.config.use_ai_predictions and self.llm_client:
             ai_prediction = self._get_ai_prediction(question, description, analysis["tokens"])
             analysis["ai_prediction"] = ai_prediction
+
+            # Log calibration data even if we later skip trading
+            self._log_calibration(
+                condition_id=condition_id,
+                tokens=analysis["tokens"],
+                ai_prediction=ai_prediction
+            )
         
         return analysis
     
@@ -193,7 +204,7 @@ Format your response as JSON:
         
         # Check confidence level
         confidence = ai_prediction.get("confidence", 0)
-        if confidence < 0.7:  # Low confidence
+        if confidence < self.config.ai_min_confidence:
             return None
         
         # Find recommended outcome
@@ -204,17 +215,83 @@ Format your response as JSON:
             if pred.get("recommend_buy"):
                 ai_prob = pred.get("probability", 0)
                 market_price = token.get("market_price", 0)
+                spread_pct = token.get("spread_pct", 0)
+                edge = ai_prob - market_price
+
+                # Require sufficient edge, tight spread, and valid prices
+                if market_price is None or market_price <= 0:
+                    continue
+                if spread_pct is None:
+                    spread_pct = 0
+                if spread_pct > self.config.ai_max_spread_pct:
+                    continue
                 
                 # Only buy if AI probability is significantly higher than market
-                if ai_prob > market_price + 0.1:  # At least 10% edge
+                if edge >= self.config.ai_min_edge:
                     return {
                         "token_id": token["token_id"],
                         "side": "BUY",
                         "price": token["best_ask"],
                         "size": self.config.default_trade_size,
-                        "reason": f"AI prediction: {ai_prob:.2f} vs market {market_price:.2f} (confidence: {confidence:.2f})",
+                        "reason": f"AI edge {edge:.2f} with confidence {confidence:.2f}; spread {spread_pct:.2f}%",
                         "ai_probability": ai_prob,
+                        "edge": edge,
                         "confidence": confidence
                     }
         
         return None
+
+    def _log_calibration(self, condition_id: str, tokens: list, ai_prediction: Dict[str, Any]) -> None:
+        """Persist AI vs market comparison for later calibration."""
+        if not ai_prediction or "predictions" not in ai_prediction:
+            return
+
+        try:
+            dirpath = os.path.dirname(self.config.calibration_log_path) or "."
+            os.makedirs(dirpath, exist_ok=True)
+            rows = []
+            predictions = ai_prediction.get("predictions", [])
+            confidence = ai_prediction.get("confidence")
+
+            for pred, token in zip(predictions, tokens):
+                market_price = token.get("market_price")
+                if market_price is None:
+                    continue
+                edge = pred.get("probability", 0) - market_price
+                rows.append(
+                    {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "condition_id": condition_id,
+                        "token_id": token.get("token_id"),
+                        "outcome": token.get("outcome"),
+                        "market_price": market_price,
+                        "ai_probability": pred.get("probability"),
+                        "edge": edge,
+                        "confidence": confidence,
+                        "recommend_buy": pred.get("recommend_buy"),
+                    }
+                )
+
+            if not rows:
+                return
+
+            header = [
+                "timestamp",
+                "condition_id",
+                "token_id",
+                "outcome",
+                "market_price",
+                "ai_probability",
+                "edge",
+                "confidence",
+                "recommend_buy",
+            ]
+
+            file_exists = os.path.isfile(self.config.calibration_log_path)
+            with open(self.config.calibration_log_path, "a", encoding="utf-8") as f:
+                if not file_exists:
+                    f.write(",".join(header) + "\n")
+                for row in rows:
+                    f.write(",".join(str(row[h]) if row[h] is not None else "" for h in header) + "\n")
+        except Exception as e:
+            logger.debug(f"Calibration log write failed: {e}")

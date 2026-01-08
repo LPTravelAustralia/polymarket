@@ -485,6 +485,16 @@ class SuperforecasterAgent:
             
             response = self.llm.invoke(messages)
             recommendation = self._parse_trade_recommendation(response.content)
+
+            # Enforce tighter edge and confidence thresholds
+            min_edge_pct = self.config.ai_min_edge * 100
+            rec_edge = recommendation.get("edge")
+            rec_conf = (recommendation.get("confidence") or "").lower()
+
+            if rec_edge is None or rec_edge < min_edge_pct:
+                return {"action": "HOLD", "reason": f"Edge {rec_edge} below {min_edge_pct:.1f}%"}
+            if rec_conf and rec_conf not in ["medium", "high"]:
+                return {"action": "HOLD", "reason": f"Confidence {rec_conf} too low"}
             
             return recommendation
             

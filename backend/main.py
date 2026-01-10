@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import asyncio
 import json
@@ -2387,6 +2387,53 @@ async def get_health():
         "superforecaster_initialized": bool(agent),
         "markets_cache_size": len(getattr(app.state, "all_markets_cache", []) or []),
         "last_update": datetime.now().isoformat(),
+    }
+
+@app.get("/api/summary/24h")
+async def summary_24h():
+    """Aggregate trades and closed trades from the last 24 hours."""
+    now = datetime.now()
+    since = (now - timedelta(hours=24)).isoformat()
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    trades_24h = [
+        dict(row) for row in c.execute(
+            "SELECT * FROM trades WHERE timestamp >= ? ORDER BY timestamp DESC",
+            (since,)
+        )
+    ]
+    closed_24h = [
+        dict(row) for row in c.execute(
+            "SELECT * FROM closed_trades WHERE closed_at >= ? ORDER BY closed_at DESC",
+            (since,)
+        )
+    ]
+    conn.close()
+
+    realized = sum(float(t.get("pnl", 0) or 0) for t in closed_24h)
+    markets_traded = sorted({t.get("market_id") for t in trades_24h if t.get("market_id")})
+
+    stats = calculate_stats(closed_24h)
+
+    return {
+        "window_hours": 24,
+        "generated_at": now.isoformat(),
+        "counts": {
+            "trades_opened": len(trades_24h),
+            "trades_closed": len(closed_24h),
+            "distinct_markets": len(markets_traded),
+        },
+        "pnl": {
+            "realized": round(realized, 2),
+            "unrealized_current": round(float(getattr(app.state, "bot_stats", {}).get("total_pnl", 0.0) or 0.0), 2),
+        },
+        "stats": stats.model_dump() if hasattr(stats, "model_dump") else stats.__dict__,
+        "recent_trades": trades_24h[:50],
+        "recent_closed": closed_24h[:50],
+        "note": "Edge and latency metrics are not persisted in DB; available in activity logs."
     }
 
 

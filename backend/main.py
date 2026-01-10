@@ -2209,13 +2209,50 @@ async def analyze_market(market_id: str):
         except:
             pass
         
-        # Demo analysis (in production, use SuperforecasterAgent)
-        # For now, return mock analysis
+        # Prefer Superforecaster if available; fallback to lightweight demo
+        agent = _get_superforecaster_agent()
+        if agent:
+            try:
+                result = await asyncio.to_thread(agent.quick_analyze, market.get("question", "Unknown"), yes_price)
+                probability = result.get("probability")
+                conf_text = (result.get("confidence") or "").upper()
+                # Map textual confidence to numeric
+                conf_map = {"LOW": 0.55, "MEDIUM": 0.7, "HIGH": 0.85}
+                conf_val = conf_map.get(conf_text, 0.65)
+
+                if probability is not None:
+                    edge = float(probability) - yes_price
+                    min_edge = 0.05
+                    if edge > min_edge:
+                        recommendation = "BUY_YES"
+                        reasoning = f"Superforecaster estimates YES at {probability:.0%} vs price {yes_price:.0%} (edge {edge:+.2f})."
+                    elif edge < -min_edge:
+                        recommendation = "BUY_NO"
+                        reasoning = f"Superforecaster estimates YES at {probability:.0%} vs price {yes_price:.0%} (edge {edge:+.2f})."
+                    else:
+                        recommendation = "HOLD"
+                        reasoning = f"Edge {edge:+.2f} below threshold {min_edge:.2f}."
+
+                    add_activity(
+                        f"🧠 SF analyze [{conf_text or 'N/A'}]: {probability:.2f} vs {yes_price:.2f} (edge {edge:+.2f}) → {recommendation.split('_')[-1]}"
+                    )
+                    return AnalysisResponse(
+                        market_id=market_id,
+                        question=market.get("question", "Unknown"),
+                        recommendation=recommendation,
+                        confidence=conf_val,
+                        predicted_probability=float(probability),
+                        reasoning=reasoning,
+                        edge=edge,
+                    )
+            except Exception as e:
+                add_activity(f"⚠️ Superforecaster analyze error: {str(e)[:80]}")
+
+        # Fallback demo analysis
         import random
         predicted = yes_price + random.uniform(-0.15, 0.15)
         predicted = max(0.05, min(0.95, predicted))
         edge = predicted - yes_price
-        
         if edge > 0.05:
             recommendation = "BUY_YES"
             reasoning = f"Market appears undervalued. Current price {yes_price:.0%} is below predicted probability of {predicted:.0%}."
@@ -2225,9 +2262,7 @@ async def analyze_market(market_id: str):
         else:
             recommendation = "HOLD"
             reasoning = f"Market is fairly priced. Current {yes_price:.0%} is close to predicted {predicted:.0%}."
-        
         add_activity(f"🔍 Analyzed: {market.get('question', 'Unknown')[:40]}...")
-        
         return AnalysisResponse(
             market_id=market_id,
             question=market.get("question", "Unknown"),
@@ -2235,7 +2270,7 @@ async def analyze_market(market_id: str):
             confidence=0.65 + random.uniform(0, 0.2),
             predicted_probability=predicted,
             reasoning=reasoning,
-            edge=edge
+            edge=edge,
         )
         
     except HTTPException:
@@ -2334,6 +2369,24 @@ async def get_stats_summary():
             "exposure": exposure,
             "config": app.state.bot_config.model_dump() if app.state.bot_config else None
         }
+    }
+
+
+# ============================================================================
+# Health Endpoint
+# ============================================================================
+
+@app.get("/api/health")
+async def get_health():
+    """Report basic health, key presence, and agent init status."""
+    agent = _get_superforecaster_agent()
+    return {
+        "bot_running": getattr(app.state, "bot_running", False),
+        "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY", "")),
+        "openai_key": bool(os.getenv("OPENAI_API_KEY", "")),
+        "superforecaster_initialized": bool(agent),
+        "markets_cache_size": len(getattr(app.state, "all_markets_cache", []) or []),
+        "last_update": datetime.now().isoformat(),
     }
 
 

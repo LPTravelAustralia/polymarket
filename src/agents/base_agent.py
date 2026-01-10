@@ -2,8 +2,9 @@
 Base agent class for Polymarket trading bots
 """
 import logging
+import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 from src.core.client import PolymarketClient
 from src.core.config import Config
@@ -80,17 +81,34 @@ class BaseAgent(ABC):
             Trade execution result
         """
         # Check risk limits
-        if not self._check_risk_limits(size, price):
-            logger.warning("Trade rejected: exceeds risk limits")
+        allowed, reason = self._check_risk_limits(size, price)
+        if not allowed:
+            logger.warning(
+                "Trade rejected: risk limits",
+                extra={
+                    "token_id": token_id,
+                    "side": side,
+                    "size": size,
+                    "price": price,
+                    "reason": reason,
+                },
+            )
             return None
         
         # Place order
+        logger.info(
+            "Placing order",
+            extra={"token_id": token_id, "side": side, "size": size, "price": price},
+        )
+        start_ts = time.time()
         result = self.client.place_order(
             token_id=token_id,
             side=side,
             price=price,
             size=size
         )
+        end_ts = time.time()
+        placement_ms = int((end_ts - start_ts) * 1000)
         
         if result:
             # Record trade
@@ -99,9 +117,22 @@ class BaseAgent(ABC):
                 "side": side,
                 "size": size,
                 "price": price,
+                "placement_ms": placement_ms,
                 "result": result
             }
             self.trade_history.append(trade_record)
+
+            logger.info(
+                "Trade executed",
+                extra={
+                    "token_id": token_id,
+                    "side": side,
+                    "size": size,
+                    "price": price,
+                    "placement_ms": placement_ms,
+                    "result": result,
+                },
+            )
             
             # Calculate and collect fees if profitable
             if side == "SELL":
@@ -113,10 +144,23 @@ class BaseAgent(ABC):
                         amount=fee,
                         transaction_hash=result.get("transaction_hash")
                     )
+                    logger.info(
+                        "Collected performance fee",
+                        extra={
+                            "token_id": token_id,
+                            "profit": profit,
+                            "fee": fee,
+                        },
+                    )
+        else:
+            logger.error(
+                "Order placement failed",
+                extra={"token_id": token_id, "side": side, "size": size, "price": price},
+            )
         
         return result
     
-    def _check_risk_limits(self, size: float, price: float) -> bool:
+    def _check_risk_limits(self, size: float, price: float) -> Tuple[bool, str]:
         """
         Check if trade is within risk limits
         
@@ -131,7 +175,7 @@ class BaseAgent(ABC):
         
         # Check max position size
         if trade_value > self.config.max_position_size:
-            return False
+            return False, "max_position_size"
         
         # Check percentage of portfolio
         balance = self.client.get_balance()
@@ -140,9 +184,9 @@ class BaseAgent(ABC):
         if total_balance > 0:
             risk_ratio = trade_value / total_balance
             if risk_ratio > self.config.risk_percentage:
-                return False
+                return False, "risk_percentage"
         
-        return True
+        return True, "ok"
     
     def _calculate_trade_profit(self, token_id: str, size: float, sell_price: float) -> float:
         """
@@ -194,9 +238,20 @@ class BaseAgent(ABC):
         try:
             # Discover markets
             markets = self.monitor.discover_markets()
+            logger.info(
+                "Discovered markets",
+                extra={"count": len(markets), "min_liquidity": self.config.min_liquidity},
+            )
             
             for market in markets:
                 # Analyze market
+                logger.debug(
+                    "Analyzing market",
+                    extra={
+                        "condition_id": market.get("condition_id"),
+                        "question": market.get("question"),
+                    },
+                )
                 analysis = self.analyze_market(market)
                 
                 # Generate trading signal
@@ -204,11 +259,29 @@ class BaseAgent(ABC):
                 
                 # Execute trade if signal is generated
                 if signal and self.config.auto_trade:
+                    logger.info(
+                        "Generated trading signal",
+                        extra={
+                            "token_id": signal.get("token_id"),
+                            "side": signal.get("side"),
+                            "price": signal.get("price"),
+                            "size": signal.get("size"),
+                            "reason": signal.get("reason"),
+                        },
+                    )
                     self.execute_trade(
                         token_id=signal["token_id"],
                         side=signal["side"],
                         size=signal["size"],
                         price=signal["price"]
+                    )
+                else:
+                    logger.debug(
+                        "No actionable signal",
+                        extra={
+                            "condition_id": market.get("condition_id"),
+                            "question": market.get("question"),
+                        },
                     )
         
         except Exception as e:

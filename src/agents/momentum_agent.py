@@ -68,6 +68,15 @@ class MomentumAgent(BaseAgent):
             Trading signal or None
         """
         tokens = analysis.get("tokens", [])
+        if not tokens:
+            logger.debug(
+                "No tokens available for signal",
+                extra={
+                    "condition_id": analysis.get("condition_id"),
+                    "question": analysis.get("question"),
+                },
+            )
+            return None
         
         # Find token with strongest momentum
         best_token = max(tokens, key=lambda x: x.get("momentum_score", 0))
@@ -75,11 +84,27 @@ class MomentumAgent(BaseAgent):
         
         # Only trade if momentum is strong enough
         if momentum_score < 1.5:
+            logger.debug(
+                "Momentum below threshold",
+                extra={
+                    "condition_id": analysis.get("condition_id"),
+                    "token_id": best_token.get("token_id"),
+                    "momentum_score": momentum_score,
+                },
+            )
             return None
         
         # Check spread is reasonable
         spread = best_token.get("spread", 0)
         if spread > 5.0:  # More than 5% spread
+            logger.debug(
+                "Spread too wide",
+                extra={
+                    "condition_id": analysis.get("condition_id"),
+                    "token_id": best_token.get("token_id"),
+                    "spread": spread,
+                },
+            )
             return None
         
         return {

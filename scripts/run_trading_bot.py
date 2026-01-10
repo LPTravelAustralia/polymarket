@@ -28,8 +28,10 @@ def main():
     
     try:
         # Run trading loop
+        cycle = 0
         while True:
-            logger.info("Running trading cycle...")
+            cycle += 1
+            logger.info("Running trading cycle", extra={"cycle": cycle})
             agent.run()
             
             # Display performance

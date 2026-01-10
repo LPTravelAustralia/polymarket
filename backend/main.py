@@ -76,6 +76,20 @@ def init_db():
             mode TEXT
         )
     """)
+
+    # Ensure new columns exist for edge and latency metrics
+    try:
+        c.execute("PRAGMA table_info(trades)")
+        cols = {row[1] for row in c.fetchall()}
+        if "edge" not in cols:
+            c.execute("ALTER TABLE trades ADD COLUMN edge REAL")
+        if "decision_latency_ms" not in cols:
+            c.execute("ALTER TABLE trades ADD COLUMN decision_latency_ms INTEGER")
+        if "placement_latency_ms" not in cols:
+            c.execute("ALTER TABLE trades ADD COLUMN placement_latency_ms INTEGER")
+    except Exception as _:
+        # Safe to ignore; PRAGMA/ALTER may fail on some SQLite variants
+        pass
     
     # Closed trades table
     c.execute("""
@@ -143,8 +157,8 @@ def save_trade(trade: Dict[str, Any]):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        INSERT INTO trades (market_id, question, side, size, entry_price, timestamp, mode)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades (market_id, question, side, size, entry_price, timestamp, mode, edge, decision_latency_ms, placement_latency_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         trade.get("market_id"),
         trade.get("question"),
@@ -152,7 +166,10 @@ def save_trade(trade: Dict[str, Any]):
         trade.get("size"),
         trade.get("entry_price"),
         trade.get("timestamp"),
-        trade.get("mode", "paper")
+        trade.get("mode", "paper"),
+        trade.get("edge"),
+        trade.get("decision_latency_ms"),
+        trade.get("placement_latency_ms")
     ))
     conn.commit()
     conn.close()
@@ -260,6 +277,8 @@ async def lifespan(app: FastAPI):
     # Global markets cache (refreshed every 5 minutes)
     app.state.all_markets_cache: List[Dict[str, Any]] = []
     app.state.markets_cache_updated: Optional[datetime] = None
+    # Per-market latest AI metrics for signal -> trade enrichment
+    app.state.last_signal_metrics: Dict[str, Dict[str, Any]] = {}
     
     if saved["positions"]:
         print(f"📂 Loaded {len(saved['positions'])} positions, ${saved['realized_pnl']:.2f} realized PnL")
@@ -881,7 +900,9 @@ async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]
     if agent:
         try:
             print(f"🔄 Calling Superforecaster.quick_analyze...", flush=True, file=sys.stderr)
+            _t0 = datetime.now()
             result = await asyncio.to_thread(agent.quick_analyze, market.question, market.yes_price)
+            decision_latency_ms = int((datetime.now() - _t0).total_seconds() * 1000)
             print(f"📥 SF result: {result}", flush=True, file=sys.stderr)
             probability = result.get("probability")
             confidence = (result.get("confidence") or "").upper()
@@ -897,6 +918,17 @@ async def _ai_signal(market: MarketResponse, config: BotConfig) -> Optional[str]
                     add_activity(
                         f"🧠 Superforecaster [{confidence}]: {probability:.2f} vs {market.yes_price:.2f} (edge {edge:+.2f}) → {direction.upper()}"
                     )
+                    # Cache metrics for this market so the trade record can include them
+                    try:
+                        app.state.last_signal_metrics[market.id] = {
+                            "source": "superforecaster",
+                            "probability": probability,
+                            "confidence": confidence,
+                            "edge": float(edge),
+                            "decision_latency_ms": int(decision_latency_ms),
+                        }
+                    except Exception:
+                        pass
                     return direction
                 else:
                     # Log why we skipped it
@@ -1337,6 +1369,7 @@ async def _trading_loop(config: BotConfig):
                     continue
 
                 entry_price = market.yes_price if signal == "yes" else market.no_price
+                _place_t0 = datetime.now()
                 position = {
                     "market_id": market.id,
                     "question": market.question,
@@ -1351,6 +1384,9 @@ async def _trading_loop(config: BotConfig):
                 app.state.positions[market.id] = position
                 save_position(position)  # Persist to DB
                 
+                # Enrich trade with any AI metrics we cached
+                metrics = getattr(app.state, "last_signal_metrics", {}).get(market.id, {})
+                placement_latency_ms = int((datetime.now() - _place_t0).total_seconds() * 1000)
                 trade = {
                     "market_id": market.id,
                     "question": market.question,
@@ -1359,6 +1395,9 @@ async def _trading_loop(config: BotConfig):
                     "entry_price": entry_price,
                     "timestamp": datetime.now().isoformat(),
                     "mode": "paper",
+                    "edge": metrics.get("edge"),
+                    "decision_latency_ms": metrics.get("decision_latency_ms"),
+                    "placement_latency_ms": placement_latency_ms,
                 }
                 app.state.trades.insert(0, trade)
                 save_trade(trade)  # Persist to DB
@@ -2131,6 +2170,7 @@ async def quick_trade(request: QuickTradeRequest):
     entry_price = market.yes_price if side == "yes" else market.no_price
     
     # Create position
+    _place_t0 = datetime.now()
     position = {
         "market_id": market.id,
         "question": market.question,
@@ -2146,6 +2186,7 @@ async def quick_trade(request: QuickTradeRequest):
     save_position(position)
     
     # Create trade record
+    placement_latency_ms = int((datetime.now() - _place_t0).total_seconds() * 1000)
     trade = {
         "market_id": market.id,
         "question": market.question,
@@ -2154,6 +2195,9 @@ async def quick_trade(request: QuickTradeRequest):
         "entry_price": entry_price,
         "timestamp": datetime.now().isoformat(),
         "mode": "paper",
+        "edge": None,
+        "decision_latency_ms": None,
+        "placement_latency_ms": placement_latency_ms,
     }
     app.state.trades.insert(0, trade)
     save_trade(trade)
@@ -2418,6 +2462,16 @@ async def summary_24h():
 
     stats = calculate_stats(closed_24h)
 
+    # Aggregate metrics
+    edges = [float(t.get("edge")) for t in trades_24h if t.get("edge") is not None]
+    decisions = [int(t.get("decision_latency_ms")) for t in trades_24h if t.get("decision_latency_ms") is not None]
+    placements = [int(t.get("placement_latency_ms")) for t in trades_24h if t.get("placement_latency_ms") is not None]
+    metrics = {
+        "avg_edge": round(sum(edges) / len(edges), 4) if edges else None,
+        "avg_decision_latency_ms": int(sum(decisions) / len(decisions)) if decisions else None,
+        "avg_placement_latency_ms": int(sum(placements) / len(placements)) if placements else None,
+    }
+
     return {
         "window_hours": 24,
         "generated_at": now.isoformat(),
@@ -2431,9 +2485,64 @@ async def summary_24h():
             "unrealized_current": round(float(getattr(app.state, "bot_stats", {}).get("total_pnl", 0.0) or 0.0), 2),
         },
         "stats": stats.model_dump() if hasattr(stats, "model_dump") else stats.__dict__,
+        "metrics": metrics,
         "recent_trades": trades_24h[:50],
         "recent_closed": closed_24h[:50],
-        "note": "Edge and latency metrics are not persisted in DB; available in activity logs."
+        "note": "Edge and latency metrics persisted on trades; per-market endpoint available."
+    }
+
+
+@app.get("/api/summary/market/{market_id}")
+async def summary_market(market_id: str, hours: int = 24):
+    """Per-market audit: trades, closed trades, stats and metrics over a window."""
+    now = datetime.now()
+    since = (now - timedelta(hours=max(1, hours))).isoformat()
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    trades = [
+        dict(row) for row in c.execute(
+            "SELECT * FROM trades WHERE market_id = ? AND timestamp >= ? ORDER BY timestamp DESC",
+            (market_id, since)
+        )
+    ]
+    closed = [
+        dict(row) for row in c.execute(
+            "SELECT * FROM closed_trades WHERE market_id = ? AND closed_at >= ? ORDER BY closed_at DESC",
+            (market_id, since)
+        )
+    ]
+    conn.close()
+
+    realized = sum(float(t.get("pnl", 0) or 0) for t in closed)
+    stats = calculate_stats(closed)
+
+    edges = [float(t.get("edge")) for t in trades if t.get("edge") is not None]
+    decisions = [int(t.get("decision_latency_ms")) for t in trades if t.get("decision_latency_ms") is not None]
+    placements = [int(t.get("placement_latency_ms")) for t in trades if t.get("placement_latency_ms") is not None]
+    metrics = {
+        "avg_edge": round(sum(edges) / len(edges), 4) if edges else None,
+        "avg_decision_latency_ms": int(sum(decisions) / len(decisions)) if decisions else None,
+        "avg_placement_latency_ms": int(sum(placements) / len(placements)) if placements else None,
+    }
+
+    return {
+        "market_id": market_id,
+        "window_hours": hours,
+        "generated_at": now.isoformat(),
+        "counts": {
+            "trades_opened": len(trades),
+            "trades_closed": len(closed),
+        },
+        "pnl": {
+            "realized": round(realized, 2),
+        },
+        "stats": stats.model_dump() if hasattr(stats, "model_dump") else stats.__dict__,
+        "metrics": metrics,
+        "trades": trades[:100],
+        "closed_trades": closed[:100],
     }
 
 

@@ -104,6 +104,47 @@ export interface TradingStats {
   profit_factor: number
 }
 
+export interface MetricsAggregation {
+  avg_edge: number | null
+  avg_decision_latency_ms: number | null
+  avg_placement_latency_ms: number | null
+}
+
+export interface Summary24h {
+  window_hours: number
+  generated_at: string
+  counts: {
+    trades_opened: number
+    trades_closed: number
+    distinct_markets: number
+  }
+  pnl: {
+    realized: number
+    unrealized_current: number
+  }
+  stats: TradingStats
+  metrics: MetricsAggregation
+  recent_trades: (Trade & { edge?: number; decision_latency_ms?: number; placement_latency_ms?: number })[]
+  recent_closed: ClosedTrade[]
+}
+
+export interface SummaryMarket {
+  market_id: string
+  window_hours: number
+  generated_at: string
+  counts: {
+    trades_opened: number
+    trades_closed: number
+  }
+  pnl: {
+    realized: number
+  }
+  stats: TradingStats
+  metrics: MetricsAggregation
+  trades: (Trade & { edge?: number; decision_latency_ms?: number; placement_latency_ms?: number })[]
+  closed_trades: ClosedTrade[]
+}
+
 export interface Portfolio {
   positions: Position[]
   trades: Trade[]
@@ -288,6 +329,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
     })
+  },
+
+  // Summary and Audit
+  getSummary24h: async (): Promise<Summary24h> => {
+    return fetchAPI('/api/summary/24h')
+  },
+
+  getSummaryMarket: async (marketId: string, hours: number = 24): Promise<SummaryMarket> => {
+    return fetchAPI(`/api/summary/market/${marketId}?hours=${hours}`)
   },
 }
 

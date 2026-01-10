@@ -7,6 +7,7 @@ import { StatsRow } from '@/components/StatsRow'
 import { MarketList } from '@/components/MarketList'
 import { EventList } from '@/components/EventList'
 import { Sidebar } from '@/components/Sidebar'
+import { SummaryMetrics } from '@/components/SummaryMetrics'
 import { MarketModal } from '@/components/MarketModal'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { ToastContainer, useToasts } from '@/components/Toast'
@@ -225,6 +226,13 @@ export default function Home() {
     refetchInterval: 5000,
   })
 
+  // Fetch 24h summary
+  const { data: summary24h } = useQuery({
+    queryKey: ['summary24h'],
+    queryFn: api.getSummary24h,
+    refetchInterval: 10000,
+  })
+
   // Bot controls
   const startBot = useMutation({
     mutationFn: (config?: BotConfig) => api.startBot(config),
@@ -350,7 +358,7 @@ export default function Home() {
             )}
           </div>
 
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-6">
             <Sidebar
               status={status}
               portfolio={portfolio}
@@ -365,6 +373,7 @@ export default function Home() {
                 await closePosition.mutateAsync(marketId)
               }}
             />
+            <SummaryMetrics summary={summary24h} />
           </div>
         </div>
       </div>

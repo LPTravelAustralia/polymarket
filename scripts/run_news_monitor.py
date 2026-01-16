@@ -35,6 +35,10 @@ Examples:
 import sys
 import argparse
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

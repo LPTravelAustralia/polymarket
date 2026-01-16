@@ -11,6 +11,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Import config to get API key after dotenv loading
+try:
+    from src.core.config import load_config
+    _CONFIG = load_config()
+except ImportError:
+    _CONFIG = None
+
 
 @dataclass
 class Article:
@@ -53,7 +60,14 @@ class NewsConnector:
         Args:
             api_key: NewsAPI key (or set NEWSAPI_KEY env var)
         """
-        self.api_key = api_key or os.getenv("NEWSAPI_KEY", "")
+        # Try to get API key from: parameter > config > environment variable
+        if api_key:
+            self.api_key = api_key
+        elif _CONFIG and hasattr(_CONFIG, 'newsapi_key') and _CONFIG.newsapi_key:
+            self.api_key = _CONFIG.newsapi_key
+        else:
+            self.api_key = os.getenv("NEWSAPI_KEY", "")
+        
         self.base_url = "https://newsapi.org/v2"
         
         if not self.api_key:

@@ -3,15 +3,20 @@ Configuration management for Polymarket Trading Bot
 """
 import os
 from typing import Optional
+from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Get the .env file path (project root)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Config(BaseSettings):
     """Configuration class for the Polymarket Trading Bot"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

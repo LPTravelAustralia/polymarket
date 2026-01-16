@@ -81,18 +81,18 @@ class PolymarketClient:
                     return response.get('data', [])
                 return response if response else []
             else:
-                # Fall back to Gamma API (market discovery, not order execution)
-                gamma_url = "https://gamma-api.polymarket.com/markets"
+                # Fall back to backend API (preferred for fresh data)
+                backend_url = "http://34.29.163.176:8000/api/markets"
                 response = self.rest_client.get(
-                    gamma_url,
-                    params={"limit": 100, "active": True},
+                    backend_url,
+                    params={"limit": 100, "sort_by": "volume"},
                     timeout=30
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    # Gamma API returns a list directly
-                    return data if isinstance(data, list) else []
-                logger.error(f"Failed to fetch markets via Gamma API: {response.status_code}")
+                    # Backend returns data in 'data' key
+                    return data.get('data', data) if isinstance(data, dict) else data
+                logger.error(f"Failed to fetch markets from backend: {response.status_code}")
                 return []
         except Exception as e:
             logger.error(f"Error fetching markets: {e}")

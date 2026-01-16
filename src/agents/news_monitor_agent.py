@@ -176,6 +176,9 @@ class NewsMonitorAgent(BaseAgent):
         # Match articles to markets
         matches = defaultdict(list)
         
+        articles_checked = 0
+        articles_too_old = 0
+        
         for article in articles:
             # Skip if we've seen this article
             article_key = f"{article.url}_{article.published_at}"
@@ -187,14 +190,19 @@ class NewsMonitorAgent(BaseAgent):
                 pub_time = datetime.fromisoformat(article.published_at.replace('Z', '+00:00'))
                 age_hours = (datetime.now() - pub_time.replace(tzinfo=None)).total_seconds() / 3600
                 if age_hours > self.max_news_age_hours:
+                    articles_too_old += 1
                     continue
             except:
                 pass
+            
+            articles_checked += 1
             
             # Combine article text for matching
             article_text = (
                 f"{article.title} {article.description or ''} {article.source}"
             ).lower()
+            
+            article_matched = False
             
             # Match against each market
             for market_id, market_kw in self.market_keywords_cache.items():
@@ -214,14 +222,22 @@ class NewsMonitorAgent(BaseAgent):
                 
                 # More lenient: 1+ keyword OR 1+ entity
                 if matched_keywords:
-                    logger.debug(f"MATCHED: '{article.title[:50]}' -> {market_id[:8]} (keywords: {matched_keywords})")
+                    logger.info(f"✓ MATCH: '{article.title[:70]}' -> {market_kw.question[:50]} (matched: {', '.join(matched_keywords[:3])})")
                     matches[market_id].append((article, matched_keywords))
+                    article_matched = True
+            
+            # Log first few unmatched for debugging
+            if not article_matched and len(matches) < 3:
+                logger.debug(f"No match: '{article.title[:80]}'")
             
             # Mark as seen
             self.seen_articles.add(article_key)
         
+        if articles_too_old > 0:
+            logger.info(f"Filtered out {articles_too_old} articles older than {self.max_news_age_hours} hours")
+        
         if not matches:
-            logger.info(f"Checked {len(articles)} articles against {len(self.market_keywords_cache)} markets - no matches found")
+            logger.info(f"Checked {articles_checked} articles against {len(self.market_keywords_cache)} markets - no matches found")
         
         return matches
     
@@ -382,12 +398,21 @@ Be precise and consider:
             # Add top keywords (not stopwords)
             all_keywords.update(list(market_kw.keywords)[:3])
         
+        # Prioritize important keywords (Fed, Trump, election, etc.)
+        priority_keywords = ['fed', 'trump', 'election', 'ukraine', 'russia', 'ceasefire', 'interest', 'rates']
+        search_keywords = [kw for kw in all_keywords if kw in priority_keywords]
+        if not search_keywords:
+            search_keywords = list(all_keywords)[:5]  # Fallback to top 5
+        
+        logger.info(f"Searching for news about: {', '.join(search_keywords[:5])}")
+        
         # Fetch articles targeted to these keywords
         articles = []
-        if all_keywords:
-            for keyword in list(all_keywords)[:3]:  # Search for top 3 keywords
-                logger.debug(f"Searching for articles about '{keyword}'...")
+        if search_keywords:
+            for keyword in search_keywords[:5]:  # Search for top 5 keywords
+                logger.info(f"Searching NewsAPI for '{keyword}'...")
                 keyword_articles = self.news_connector.search(keyword, limit=20)
+                logger.debug(f"  Found {len(keyword_articles)} articles")
                 articles.extend(keyword_articles)
         else:
             # Fallback to generic headlines if no keywords

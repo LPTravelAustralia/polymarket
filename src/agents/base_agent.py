@@ -27,9 +27,16 @@ class BaseAgent(ABC):
             config: Configuration object
         """
         self.config = config
-        self.client = PolymarketClient(config)
-        self.monitor = MarketMonitor(self.client, config)
-        self.fee_collector = FeeCollector(config)
+        
+        # In dry-run mode, skip client initialization (no wallet needed)
+        if config.dry_run:
+            self.client = None
+            self.monitor = None
+            self.fee_collector = None
+        else:
+            self.client = PolymarketClient(config)
+            self.monitor = MarketMonitor(self.client, config)
+            self.fee_collector = FeeCollector(config)
         
         self.positions: Dict[str, Any] = {}
         self.trade_history: List[Dict[str, Any]] = []

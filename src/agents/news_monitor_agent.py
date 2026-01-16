@@ -536,3 +536,45 @@ Be precise and consider:
                 'max_news_age_hours': self.max_news_age_hours
             }
         }
+    
+    def analyze_market(self, market: Dict) -> Dict:
+        """
+        Analyze a market based on current news sentiment.
+        
+        Required by BaseAgent abstract interface.
+        
+        Args:
+            market: Market data dictionary
+            
+        Returns:
+            Analysis with sentiment scores
+        """
+        # This is called by BaseAgent framework but news monitoring
+        # uses the generate_signals() method instead for full news analysis
+        return {
+            'market_id': market.get('id'),
+            'sentiment': 'neutral',
+            'impact': 0.5
+        }
+    
+    def generate_trading_signal(self, analysis: Dict) -> Optional[Dict]:
+        """
+        Generate trading signal from market analysis.
+        
+        Required by BaseAgent abstract interface.
+        
+        Args:
+            analysis: Market analysis result
+            
+        Returns:
+            Trading signal or None
+        """
+        # This is called by BaseAgent framework but news monitoring
+        # uses the generate_signals() method instead for full signal generation
+        if analysis.get('impact', 0) > self.min_impact_score:
+            return {
+                'action': 'BUY' if analysis.get('sentiment') == 'bullish' else 'SELL',
+                'confidence': analysis.get('impact', 0),
+                'reason': 'News-based signal'
+            }
+        return None

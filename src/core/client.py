@@ -90,8 +90,8 @@ class PolymarketClient:
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    # Backend returns data in 'data' key
-                    return data.get('data', data) if isinstance(data, dict) else data
+                    # Backend returns {markets: [...], total: ..., showing: ...}
+                    return data.get('markets', []) if isinstance(data, dict) else []
                 logger.error(f"Failed to fetch markets from backend: {response.status_code}")
                 return []
         except Exception as e:

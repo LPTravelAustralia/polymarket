@@ -363,24 +363,52 @@ Be precise and consider:
         Monitor news and generate trading signals
         
         This is the main method that:
-        1. Fetches latest news
+        1. Fetches latest news (targeted by market keywords)
         2. Matches to markets
         3. Analyzes impact
         4. Generates signals
         """
         logger.info("Checking for breaking news...")
         
-        # Fetch latest headlines
-        articles = self.news_connector.get_headlines(limit=50)
+        if not markets:
+            logger.warning("No markets to monitor")
+            return []
         
-        if not articles:
+        # Extract top keywords from all markets
+        all_keywords = set()
+        for market in markets:
+            question = market.get('question', '')
+            market_kw = self._extract_market_keywords(question, market.get('id', ''))
+            # Add top keywords (not stopwords)
+            all_keywords.update(list(market_kw.keywords)[:3])
+        
+        # Fetch articles targeted to these keywords
+        articles = []
+        if all_keywords:
+            for keyword in list(all_keywords)[:3]:  # Search for top 3 keywords
+                logger.debug(f"Searching for articles about '{keyword}'...")
+                keyword_articles = self.news_connector.search(keyword, limit=20)
+                articles.extend(keyword_articles)
+        else:
+            # Fallback to generic headlines if no keywords
+            articles = self.news_connector.get_headlines(limit=50)
+        
+        # Remove duplicates
+        seen_urls = set()
+        unique_articles = []
+        for a in articles:
+            if a.url not in seen_urls:
+                seen_urls.add(a.url)
+                unique_articles.append(a)
+        
+        if not unique_articles:
             logger.warning("No news articles retrieved")
             return []
         
-        logger.info(f"Retrieved {len(articles)} headlines")
+        logger.info(f"Retrieved {len(unique_articles)} headlines from {len(seen_urls)} unique sources")
         
         # Match news to markets
-        matches = self._match_news_to_markets(articles, markets)
+        matches = self._match_news_to_markets(unique_articles, markets)
         
         if not matches:
             logger.info("No relevant news found for active markets")

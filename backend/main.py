@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import asyncio
 import json
+import logging
 import os
 import sys
 import sqlite3
@@ -25,6 +26,9 @@ from src.core.gamma_client import GammaMarketClient
 from src.core.config import load_config
 from src.agents.superforecaster import SuperforecasterAgent
 
+# Setup logging
+logger = logging.getLogger(__name__)
+
 # AI API keys from environment
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -33,8 +37,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 SUPER_AGENT: Optional[SuperforecasterAgent] = None
 
 # Log API key status at startup
-import sys
-print(f"🔑 Startup: ANTHROPIC_KEY={'✓ present' if ANTHROPIC_API_KEY else '✗ missing'}, OPENAI_KEY={'✓ present' if OPENAI_API_KEY else '✗ missing'}", flush=True, file=sys.stderr)
+logger.info(f"🔑 Startup: ANTHROPIC_KEY={'✓ present' if ANTHROPIC_API_KEY else '✗ missing'}, OPENAI_KEY={'✓ present' if OPENAI_API_KEY else '✗ missing'}")
 
 # ============================================================================
 # SQLite Persistence
@@ -256,7 +259,7 @@ async def lifespan(app: FastAPI):
     app.state.gamma_client = GammaMarketClient()
     app.state.bot_running = False
     app.state.bot_task = None
-    app.state.bot_config: Optional[Any] = None
+    app.state.bot_config = None
     app.state.bot_stats = {
         "trades_today": 0,
         "total_pnl": 0.0,
@@ -264,21 +267,21 @@ async def lifespan(app: FastAPI):
         "active_positions": len(saved["positions"])
     }
     app.state.activity_log = []
-    app.state.positions: Dict[str, Dict[str, Any]] = saved["positions"]
-    app.state.trades: List[Dict[str, Any]] = saved["trades"]
-    app.state.closed_trades: List[Dict[str, Any]] = saved["closed_trades"]
-    app.state.realized_pnl: float = saved["realized_pnl"]
-    app.state.price_history: Dict[str, deque] = {}
-    app.state.equity_history: List[Dict[str, Any]] = []  # For charting
+    app.state.positions = saved["positions"]
+    app.state.trades = saved["trades"]
+    app.state.closed_trades = saved["closed_trades"]
+    app.state.realized_pnl = saved["realized_pnl"]
+    app.state.price_history = {}
+    app.state.equity_history = []  # For charting
     app.state.equity_start = 0.0
     app.state.equity_peak = 0.0
-    app.state.connected_clients: List[WebSocket] = []
+    app.state.connected_clients = []
     
     # Global markets cache (refreshed every 5 minutes)
-    app.state.all_markets_cache: List[Dict[str, Any]] = []
-    app.state.markets_cache_updated: Optional[datetime] = None
+    app.state.all_markets_cache = []
+    app.state.markets_cache_updated = None
     # Per-market latest AI metrics for signal -> trade enrichment
-    app.state.last_signal_metrics: Dict[str, Dict[str, Any]] = {}
+    app.state.last_signal_metrics = {}
     
     if saved["positions"]:
         print(f"📂 Loaded {len(saved['positions'])} positions, ${saved['realized_pnl']:.2f} realized PnL")

@@ -33,8 +33,17 @@ See [SETUP_REFERENCE.md](SETUP_REFERENCE.md) for detailed deployment info and TO
   - Combined (multi-signal weighted)
   - AI-powered predictions using GPT-4 or Claude
   - News sentiment analysis
+  - **🆕 News-driven real-time trading** (monitors breaking news and trades ahead of the market)
 
-- � **Copy Trading (Planned)**
+- 📰 **Real-Time News Monitoring** 🆕
+  - Monitors breaking news from NewsAPI
+  - AI-powered impact analysis with Claude
+  - Automatic market-news correlation
+  - Twitter trending validation (optional)
+  - Trades within minutes of breaking news
+  - See [NEWS_TRADING_GUIDE.md](docs/NEWS_TRADING_GUIDE.md) for details
+
+- 🎯 **Copy Trading (Planned)**
   - Mirror trades from profitable "smart money" wallets
   - Real-time transaction monitoring via PolygonScan
   - Proportional position sizing
@@ -126,6 +135,13 @@ INFURA_API_KEY=your_key_here         # Alternative to Alchemy
 
 # Optional: News Analysis
 NEWSAPI_KEY=your_key_here            # News sentiment analysis
+TWITTER_BEARER_TOKEN=your_key_here   # Twitter trending validation (optional)
+
+# News Trading Configuration (NEW)
+NEWS_MONITORING_INTERVAL=300         # Check news every 5 minutes
+NEWS_MIN_IMPACT_SCORE=0.6           # Minimum impact to trade (0-1)
+NEWS_MIN_CONFIDENCE=0.65            # Minimum confidence to trade (0-1)
+NEWS_USE_TWITTER=false              # Enable Twitter validation
 
 # Trading Configuration
 DRY_RUN=true                         # Paper trading mode
@@ -141,7 +157,8 @@ DRY_RUN=true                         # Paper trading mode
 | PolygonScan | Wallet analysis | [polygonscan.com/apis](https://polygonscan.com/apis) | Free: 5 calls/sec |
 | Alchemy | Blockchain RPC | [alchemy.com](https://alchemy.com) | Free tier available |
 | Infura | Alternative RPC | [infura.io](https://infura.io) | Free tier available |
-| NewsAPI | News sentiment | [newsapi.org](https://newsapi.org) | Free: 100/day |
+| NewsAPI | **News trading** 🆕 | [newsapi.org/register](https://newsapi.org/register) | Free: 100/day |
+| Twitter API | **Twitter validation** 🆕 | [developer.twitter.com](https://developer.twitter.com) | Free: 500k tweets/month |
 
 ### Installation
 
@@ -252,6 +269,42 @@ This bot:
 - Trades on high-confidence predictions with edge
 
 **Note:** Requires `USE_AI_PREDICTIONS=true` and valid API key in `.env`
+
+### 5. News-Driven Trading Bot 🆕
+
+Run the real-time news monitoring bot:
+
+```bash
+# Test mode - see what news signals it finds
+python scripts/run_news_monitor.py --once --dry-run
+
+# Continuous monitoring (test mode)
+python scripts/run_news_monitor.py --dry-run
+
+# Live trading with Twitter validation
+python scripts/run_news_monitor.py --use-twitter
+```
+
+This bot:
+- Monitors breaking news from NewsAPI every 5 minutes
+- Matches news to relevant Polymarket markets
+- Uses Claude AI to analyze news impact
+- Validates with Twitter trending topics (optional)
+- Trades ahead of market reactions
+
+**Features:**
+- ⚡ Acts within minutes of breaking news
+- 🤖 AI-powered impact analysis
+- 🐦 Twitter trending validation
+- 📊 Confidence & urgency scoring
+- 🎯 Automatic market-news correlation
+
+**Requirements:**
+- `NEWSAPI_KEY` (required) - Get at [newsapi.org/register](https://newsapi.org/register)
+- `ANTHROPIC_API_KEY` (strongly recommended) - Get at [console.anthropic.com](https://console.anthropic.com)
+- `TWITTER_BEARER_TOKEN` (optional) - Get at [developer.twitter.com](https://developer.twitter.com)
+
+**See full documentation:** [docs/NEWS_TRADING_GUIDE.md](docs/NEWS_TRADING_GUIDE.md)
 
 ## Fee Collection Model
 

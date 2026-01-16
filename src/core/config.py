@@ -64,6 +64,17 @@ class Config(BaseSettings):
     ai_min_edge: float = Field(default=0.15)
     ai_max_spread_pct: float = Field(default=3.0)
     calibration_log_path: str = Field(default="calibration_logs/ai_calibration.csv")
+    
+    # News Monitoring Configuration
+    newsapi_key: Optional[str] = Field(default=None)
+    news_monitoring_interval: int = Field(default=300)  # 5 minutes
+    news_min_impact_score: float = Field(default=0.6)
+    news_min_confidence: float = Field(default=0.65)
+    news_max_age_hours: int = Field(default=2)
+    news_use_twitter: bool = Field(default=False)
+    
+    # Twitter/X Configuration
+    twitter_bearer_token: Optional[str] = Field(default=None)
 
 
 def load_config() -> Config:

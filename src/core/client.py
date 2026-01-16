@@ -81,15 +81,18 @@ class PolymarketClient:
                     return response.get('data', [])
                 return response if response else []
             else:
-                # Fall back to REST API
-                url = f"{self.base_url}/markets"
-                response = self.rest_client.get(url, params={"limit": 100, "next_cursor": next_cursor})
+                # Fall back to Gamma API (market discovery, not order execution)
+                gamma_url = "https://gamma-api.polymarket.com/markets"
+                response = self.rest_client.get(
+                    gamma_url,
+                    params={"limit": 100, "active": True},
+                    timeout=30
+                )
                 if response.status_code == 200:
                     data = response.json()
-                    if isinstance(data, dict):
-                        return data.get('data', data.get('markets', []))
-                    return data if data else []
-                logger.error(f"Failed to fetch markets via REST API: {response.status_code}")
+                    # Gamma API returns a list directly
+                    return data if isinstance(data, list) else []
+                logger.error(f"Failed to fetch markets via Gamma API: {response.status_code}")
                 return []
         except Exception as e:
             logger.error(f"Error fetching markets: {e}")

@@ -75,8 +75,9 @@ class MarketMonitor:
                 except (ValueError, TypeError):
                     pass  # Skip date check if parsing fails
             
-            # Only include if market is marked as active
-            if not market.get("active", False):
+            # Check if market is marked as active (if field exists)
+            # Backend API pre-filters to active markets, so field may not exist
+            if market.get("active") is False or market.get("closed") is True:
                 continue
             
             filtered_markets.append(market)

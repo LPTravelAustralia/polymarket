@@ -409,18 +409,11 @@ Be precise and consider:
         # Fetch articles targeted to these keywords
         articles = []
         if search_keywords:
-            # Try top-headlines first (fresher articles on free tier)
-            for keyword in search_keywords[:3]:  # Top 3 keywords from headlines
-                logger.info(f"Searching top headlines for '{keyword}'...")
-                headline_articles = self.news_connector.get_headlines(query=keyword, limit=15)
-                logger.debug(f"  Found {len(headline_articles)} headlines")
-                articles.extend(headline_articles)
-            
-            # Then search everything endpoint for more depth
-            for keyword in search_keywords[:2]:  # Top 2 keywords for historical search
-                logger.info(f"Searching historical news for '{keyword}'...")
-                keyword_articles = self.news_connector.search(keyword, days_back=3, limit=10)
-                logger.debug(f"  Found {len(keyword_articles)} historical articles")
+            # Search everything endpoint with recent timeframe (3 days for more hits)
+            for keyword in search_keywords[:5]:  # Top 5 keywords
+                logger.info(f"Searching NewsAPI for '{keyword}'...")
+                keyword_articles = self.news_connector.search(keyword, days_back=3, limit=15)
+                logger.debug(f"  Found {len(keyword_articles)} articles")
                 articles.extend(keyword_articles)
         else:
             # Fallback to generic headlines if no keywords

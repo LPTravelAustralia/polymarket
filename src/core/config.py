@@ -75,7 +75,7 @@ class Config(BaseSettings):
     news_monitoring_interval: int = Field(default=300)  # 5 minutes
     news_min_impact_score: float = Field(default=0.6)
     news_min_confidence: float = Field(default=0.65)
-    news_max_age_hours: int = Field(default=24)  # 24 hours (was 2, too restrictive for testing)
+    news_max_age_hours: int = Field(default=72)  # 72 hours (NewsAPI free tier has ~24h delay)
     news_use_twitter: bool = Field(default=False)
     
     # Twitter/X Configuration

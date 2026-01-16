@@ -104,6 +104,7 @@ class NewsMonitorAgent(BaseAgent):
         self.seen_articles: Set[str] = set()  # Track processed articles
         self.market_keywords_cache: Dict[str, MarketKeywords] = {}
         self.last_update = None
+        self.claude_failures = 0  # Track Claude API failures
         
         logger.info(f"NewsMonitorAgent initialized - checking every {self.monitoring_interval}s")
     
@@ -253,6 +254,12 @@ class NewsMonitorAgent(BaseAgent):
         Returns:
             (impact_score, direction, confidence, reasoning)
         """
+        # Skip AI if it's been failing repeatedly
+        if self.claude_failures > 3:
+            logger.debug("Claude API unavailable, using fallback scoring")
+            relevance = min(0.7, len(matched_keywords) / 10.0)
+            return relevance, 'NEUTRAL', 0.4, "Fallback: AI unavailable"
+        
         if not self.claude_client:
             # Fallback: simple heuristic
             return 0.5, 'NEUTRAL', 0.5, "AI analysis not available"
@@ -281,10 +288,12 @@ Be precise and consider:
 3. Does it provide new information?
 4. What is the credibility of the source?"""
 
+            logger.debug(f"Analyzing news impact with Claude AI...")
             response = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=400,
                 temperature=0.3,
+                timeout=30.0,  # Add 30 second timeout
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -322,8 +331,10 @@ Be precise and consider:
             return impact, direction, confidence, reasoning or "Analysis complete"
             
         except Exception as e:
-            logger.error(f"Claude analysis failed: {e}")
-            return 0.5, 'NEUTRAL', 0.3, f"Analysis error: {str(e)}"
+            self.claude_failures += 1
+            logger.warning(f"Claude analysis failed ({self.claude_failures}/3): {e}")
+            # Return neutral signal instead of failing
+            return 0.5, 'NEUTRAL', 0.3, f"Analysis unavailable: {str(e)[:100]}"
     
     def _check_twitter_trends(self, keywords: List[str]) -> float:
         """

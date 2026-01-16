@@ -157,18 +157,12 @@ def main():
     
     # Initialize components
     try:
-        # In dry-run mode, skip client initialization (no wallet needed for testing)
-        if config.dry_run:
-            logger.info("⚠️  Dry-run mode: skipping Polymarket client initialization")
-            client = None
-            market_monitor = None
-        else:
-            client = PolymarketClient(config)
-            market_monitor = MarketMonitor(client, config)
+        # Initialize client (will use REST API in dry-run mode)
+        client = PolymarketClient(config)
+        market_monitor = MarketMonitor(client, config)
         
         agent = NewsMonitorAgent(config)
-        if market_monitor:
-            agent.market_monitor = market_monitor
+        agent.market_monitor = market_monitor
         
         logger.info("✅ All components initialized successfully")
         
@@ -182,17 +176,12 @@ def main():
             # Single run mode
             logger.info("\n🔍 Running single news check...")
             
-            if market_monitor:
-                # Get active markets
-                markets = market_monitor.discover_markets(min_liquidity=args.min_liquidity)
-                logger.info(f"Found {len(markets)} markets with sufficient liquidity")
-                
-                # Generate signals
-                signals = agent.generate_signals(markets)
-            else:
-                # Dry-run mode without real markets - just test with empty list
-                logger.info("Testing news signal generation (no real markets in dry-run mode)")
-                signals = agent.generate_signals([])
+            # Get active markets
+            markets = market_monitor.discover_markets(min_liquidity=args.min_liquidity)
+            logger.info(f"Found {len(markets)} markets with sufficient liquidity")
+            
+            # Generate signals
+            signals = agent.generate_signals(markets)
             
             if signals:
                 logger.info(f"\n📊 Generated {len(signals)} trading signals:\n")

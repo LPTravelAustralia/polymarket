@@ -4,14 +4,21 @@ Core Polymarket API client wrapper
 import logging
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
-
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, OrderType
-from py_clob_client.order_builder.constants import BUY, SELL
+import httpx
 
 from src.core.config import Config
 
 logger = logging.getLogger(__name__)
+
+# Try to import CLOB client, but don't fail if unavailable (for dry-run mode)
+try:
+    from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import OrderArgs, OrderType
+    from py_clob_client.order_builder.constants import BUY, SELL
+    CLOB_CLIENT_AVAILABLE = True
+except ImportError:
+    CLOB_CLIENT_AVAILABLE = False
+    ClobClient = None
 
 
 class PolymarketClient:
@@ -28,24 +35,32 @@ class PolymarketClient:
         """
         self.config = config
         self.client: Optional[ClobClient] = None
-        self._initialize_client()
+        self.rest_client = httpx.Client()
+        self.base_url = "https://clob.polymarket.com" if config.bot_mode == "mainnet" else "https://clob-dev.polymarket.com"
+        
+        # In dry-run mode or without credentials, use REST API only
+        if not config.dry_run and config.polymarket_api_key and CLOB_CLIENT_AVAILABLE:
+            self._initialize_clob_client()
+        else:
+            if config.dry_run:
+                logger.info("Dry-run mode: using public REST API only (no trading)")
+            else:
+                logger.info("Using public REST API (no trading credentials available)")
     
-    def _initialize_client(self):
-        """Initialize the CLOB client with credentials"""
+    def _initialize_clob_client(self):
+        """Initialize the CLOB client with credentials for trading"""
         try:
-            host = "https://clob.polymarket.com" if self.config.bot_mode == "mainnet" else "https://clob-dev.polymarket.com"
-            
             self.client = ClobClient(
-                host=host,
+                host=self.base_url,
                 key=self.config.polymarket_api_key,
                 chain_id=self.config.chain_id,
                 signature_type=0,  # EOA
                 funder=self.config.wallet_address
             )
-            logger.info("Polymarket client initialized successfully")
+            logger.info("Polymarket CLOB client initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize Polymarket client: {e}")
-            raise
+            logger.error(f"Failed to initialize Polymarket CLOB client: {e}")
+            logger.info("Falling back to public REST API")
     
     def get_markets(self, next_cursor: str = "MA==") -> List[Dict[str, Any]]:
         """
@@ -58,11 +73,24 @@ class PolymarketClient:
             List of market data dictionaries
         """
         try:
-            response = self.client.get_markets(next_cursor=next_cursor)
-            # Response may be a dict with 'data' key or a list
-            if isinstance(response, dict):
-                return response.get('data', [])
-            return response if response else []
+            # If CLOB client is available, use it
+            if self.client:
+                response = self.client.get_markets(next_cursor=next_cursor)
+                # Response may be a dict with 'data' key or a list
+                if isinstance(response, dict):
+                    return response.get('data', [])
+                return response if response else []
+            else:
+                # Fall back to REST API
+                url = f"{self.base_url}/markets"
+                response = self.rest_client.get(url, params={"limit": 100, "next_cursor": next_cursor})
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        return data.get('data', data.get('markets', []))
+                    return data if data else []
+                logger.error(f"Failed to fetch markets via REST API: {response.status_code}")
+                return []
         except Exception as e:
             logger.error(f"Error fetching markets: {e}")
             return []

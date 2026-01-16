@@ -171,6 +171,7 @@ class NewsMonitorAgent(BaseAgent):
                 self.market_keywords_cache[market_id] = self._extract_market_keywords(
                     question, market_id
                 )
+                logger.debug(f"Indexed market: {question[:60]}... | Keywords: {self.market_keywords_cache[market_id].keywords}")
         
         # Match articles to markets
         matches = defaultdict(list)
@@ -192,29 +193,35 @@ class NewsMonitorAgent(BaseAgent):
             
             # Combine article text for matching
             article_text = (
-                f"{article.title} {article.description or ''}"
+                f"{article.title} {article.description or ''} {article.source}"
             ).lower()
             
             # Match against each market
             for market_id, market_kw in self.market_keywords_cache.items():
                 matched_keywords = []
                 
-                # Check keywords
+                # Check keywords (more lenient)
                 for keyword in market_kw.keywords:
-                    if keyword in article_text:
+                    if keyword.lower() in article_text:
                         matched_keywords.append(keyword)
                 
                 # Check entities (more important)
+                entity_matches = []
                 for entity in market_kw.entities:
-                    if entity in article_text:
+                    if entity.lower() in article_text:
+                        entity_matches.append(entity)
                         matched_keywords.append(entity)
                 
-                # If we have matches, add to results
-                if len(matched_keywords) >= 2 or any(e in article_text for e in market_kw.entities):
+                # More lenient: 1+ keyword OR 1+ entity
+                if matched_keywords:
+                    logger.debug(f"MATCHED: '{article.title[:50]}' -> {market_id[:8]} (keywords: {matched_keywords})")
                     matches[market_id].append((article, matched_keywords))
             
             # Mark as seen
             self.seen_articles.add(article_key)
+        
+        if not matches:
+            logger.info(f"Checked {len(articles)} articles against {len(self.market_keywords_cache)} markets - no matches found")
         
         return matches
     

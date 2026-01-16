@@ -87,15 +87,15 @@ def parse_args():
     parser.add_argument(
         '--min-impact',
         type=float,
-        default=0.6,
-        help='Minimum impact score to generate signal (0-1, default: 0.6)'
+        default=0.55,
+        help='Minimum impact score to generate signal (0-1, default: 0.55)'
     )
     
     parser.add_argument(
         '--min-confidence',
         type=float,
-        default=0.65,
-        help='Minimum confidence to trade (0-1, default: 0.65)'
+        default=0.50,
+        help='Minimum confidence to trade (0-1, default: 0.50)'
     )
     
     parser.add_argument(

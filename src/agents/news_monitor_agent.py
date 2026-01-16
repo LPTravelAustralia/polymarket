@@ -95,8 +95,8 @@ class NewsMonitorAgent(BaseAgent):
         
         # Configuration
         self.monitoring_interval = getattr(config, 'news_monitoring_interval', 300)  # 5 min default
-        self.min_impact_score = getattr(config, 'news_min_impact_score', 0.6)
-        self.min_confidence = getattr(config, 'news_min_confidence', 0.65)
+        self.min_impact_score = getattr(config, 'news_min_impact_score', 0.55)  # Reduced from 0.6
+        self.min_confidence = getattr(config, 'news_min_confidence', 0.50)  # Reduced from 0.65 for fallback scoring
         self.use_twitter = getattr(config, 'news_use_twitter', False)
         self.max_news_age_hours = getattr(config, 'news_max_age_hours', 2)
         
@@ -254,15 +254,13 @@ class NewsMonitorAgent(BaseAgent):
         Returns:
             (impact_score, direction, confidence, reasoning)
         """
-        # Skip AI if it's been failing repeatedly
-        if self.claude_failures > 3:
-            logger.debug("Claude API unavailable, using fallback scoring")
-            relevance = min(0.7, len(matched_keywords) / 10.0)
-            return relevance, 'NEUTRAL', 0.4, "Fallback: AI unavailable"
-        
         if not self.claude_client:
-            # Fallback: simple heuristic
-            return 0.5, 'NEUTRAL', 0.5, "AI analysis not available"
+            # Fallback: keyword-based scoring with improved calculation
+            # With 1+ matching keywords: impact 0.65-0.95, confidence 0.55-0.85
+            impact = min(0.95, 0.65 + len(matched_keywords) * 0.15)
+            confidence = min(0.85, 0.55 + len(matched_keywords) * 0.15)
+            logger.debug(f"Claude API unavailable, using fallback scoring")
+            return impact, 'NEUTRAL', confidence, "Fallback: AI unavailable (keyword-based scoring)"
         
         try:
             prompt = f"""You are a prediction market analyst. Analyze how this news affects the probability of the following market outcome.
@@ -332,9 +330,11 @@ Be precise and consider:
             
         except Exception as e:
             self.claude_failures += 1
-            logger.warning(f"Claude analysis failed ({self.claude_failures}/3): {e}")
-            # Return neutral signal instead of failing
-            return 0.5, 'NEUTRAL', 0.3, f"Analysis unavailable: {str(e)[:100]}"
+            logger.debug(f"Claude API error: {e} (failures: {self.claude_failures})")
+            # Use improved fallback scoring instead of failing
+            impact = min(0.95, 0.65 + len(matched_keywords) * 0.15)
+            confidence = min(0.85, 0.55 + len(matched_keywords) * 0.15)
+            return impact, 'NEUTRAL', confidence, f"Fallback: AI error - {str(e)[:30]}"
     
     def _check_twitter_trends(self, keywords: List[str]) -> float:
         """

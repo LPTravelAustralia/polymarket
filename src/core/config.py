@@ -73,8 +73,8 @@ class Config(BaseSettings):
     # News Monitoring Configuration
     newsapi_key: Optional[str] = Field(default=None)
     news_monitoring_interval: int = Field(default=300)  # 5 minutes
-    news_min_impact_score: float = Field(default=0.6)
-    news_min_confidence: float = Field(default=0.65)
+    news_min_impact_score: float = Field(default=0.55)  # Improved fallback scoring
+    news_min_confidence: float = Field(default=0.50)  # Realistic for keyword-based scoring
     news_max_age_hours: int = Field(default=72)  # 72 hours (NewsAPI free tier has ~24h delay)
     news_use_twitter: bool = Field(default=False)
     

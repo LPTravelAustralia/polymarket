@@ -49,9 +49,15 @@ class MarketMonitor:
         filtered_markets = []
         
         for market in markets:
-            # Check liquidity
-            liquidity = float(market.get("liquidity", 0) or 0)
-            if liquidity < min_liq:
+            # Check liquidity (convert string to float)
+            try:
+                liquidity = float(market.get("liquidity", "0") or "0")
+            except (ValueError, TypeError):
+                liquidity = 0.0
+            
+            # For news-driven trading, be lenient with liquidity requirement
+            # since we're looking for any match, not just highly liquid markets
+            if liquidity < (min_liq * 0.5):  # Use 50% of threshold
                 continue
             
             # Check tags if specified
@@ -60,14 +66,18 @@ class MarketMonitor:
                 if not any(tag in market_tags for tag in tags):
                     continue
             
-            # Check if market is still active
-            end_date = market.get("end_date")
+            # Check if market is still active (not yet closed)
+            end_date = market.get("endDate") or market.get("end_date")
             if end_date:
                 try:
                     if datetime.fromisoformat(end_date.replace('Z', '+00:00')) < datetime.now():
                         continue
                 except (ValueError, TypeError):
                     pass  # Skip date check if parsing fails
+            
+            # Only include if market is marked as active
+            if not market.get("active", False):
+                continue
             
             filtered_markets.append(market)
         

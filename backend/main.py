@@ -18,6 +18,7 @@ import sqlite3
 import httpx
 from pathlib import Path
 from collections import deque
+from datetime import datetime, timedelta
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -209,6 +210,32 @@ def save_stat(key: str, value: float):
     c.execute("INSERT OR REPLACE INTO stats (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
     conn.close()
+
+
+def get_trades_since(since_iso: str) -> List[Dict[str, Any]]:
+    """Return entry trades since ISO8601 timestamp"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    rows = c.execute(
+        "SELECT * FROM trades WHERE timestamp >= ? ORDER BY id DESC",
+        (since_iso,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_closed_trades_since(since_iso: str) -> List[Dict[str, Any]]:
+    """Return closed trades since ISO8601 timestamp"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    rows = c.execute(
+        "SELECT * FROM closed_trades WHERE closed_at >= ? ORDER BY id DESC",
+        (since_iso,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def load_state() -> Dict[str, Any]:
@@ -2539,6 +2566,55 @@ async def get_stats_summary():
             "config": app.state.bot_config.model_dump() if app.state.bot_config else None
         }
     }
+
+
+@app.get("/api/stats/since")
+async def get_stats_since(since: str):
+    """Get trading stats since a given ISO8601 timestamp"""
+    # Basic validation
+    try:
+        # Accept timestamps with or without timezone; coerce to string used for sqlite compare
+        _ = datetime.fromisoformat(since.replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid 'since' timestamp. Use ISO8601.")
+
+    try:
+        opened = get_trades_since(since)
+        closed = get_closed_trades_since(since)
+
+        realized = sum(t.get("pnl", 0.0) for t in closed)
+        wins = [t for t in closed if t.get("pnl", 0) > 0]
+        losses = [t for t in closed if t.get("pnl", 0) < 0]
+        win_rate = (len(wins) / len(closed) * 100.0) if closed else 0.0
+        avg_win = (sum(t.get("pnl", 0.0) for t in wins) / len(wins)) if wins else 0.0
+        avg_loss = (sum(t.get("pnl", 0.0) for t in losses) / len(losses)) if losses else 0.0
+        profit_factor = (sum(t.get("pnl", 0.0) for t in wins) / abs(sum(t.get("pnl", 0.0) for t in losses))) if losses else (1.0 if wins else 0.0)
+
+        return {
+            "since": since,
+            "generated_at": datetime.now().isoformat(),
+            "counts": {
+                "trades_opened": len(opened),
+                "trades_closed": len(closed),
+                "distinct_markets": len({t.get("market_id") for t in opened + closed}),
+            },
+            "pnl": {
+                "realized": realized,
+            },
+            "stats": {
+                "total_trades": len(opened) + len(closed),
+                "winning_trades": len(wins),
+                "losing_trades": len(losses),
+                "win_rate": round(win_rate, 2),
+                "avg_win": round(avg_win, 3),
+                "avg_loss": round(avg_loss, 3),
+                "profit_factor": round(profit_factor, 2) if profit_factor else 0.0,
+            },
+            "recent_opened": opened[:50],
+            "recent_closed": closed[:50],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================

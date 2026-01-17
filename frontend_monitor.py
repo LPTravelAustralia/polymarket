@@ -16,8 +16,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Backend running on GCloud VM
-BACKEND_URL = "http://34.29.163.176:8000"
+# Backend running locally on VM
+BACKEND_URL = "http://localhost:8000"
 TIMEOUT = 30.0
 
 class FrontendMonitor:
@@ -65,6 +65,10 @@ class FrontendMonitor:
                      market_question: str, keywords: List[str]) -> Optional[Dict]:
         """Analyze news impact via backend"""
         try:
+            # Use richer keywords for better analysis
+            if not keywords or keywords == ['news']:
+                keywords = ['fed', 'interest', 'rates', 'trump', 'election', 'bitcoin', 'nba', 'ukraine']
+            
             payload = {
                 "headline": headline,
                 "description": description,
@@ -121,19 +125,42 @@ class FrontendMonitor:
             return
         
         # Get markets
-        markets = self.get_markets(limit=50)
+        markets = self.get_markets(limit=200)
         if not markets:
             logger.error("No markets available")
             return
         
-        logger.info(f"\n📊 Searching for news about key topics...")
+        # Select diverse test markets
+        test_markets = []
+        categories = {
+            'fed': lambda q: 'fed' in q.lower() and 'interest' in q.lower(),
+            'sports': lambda q: any(w in q.lower() for w in ['nba', 'nfl', 'championship', 'super bowl']),
+            'politics': lambda q: any(w in q.lower() for w in ['trump', 'election', 'president']),
+            'crypto': lambda q: any(w in q.lower() for w in ['bitcoin', 'btc', 'crypto', 'eth']),
+            'world': lambda q: any(w in q.lower() for w in ['ukraine', 'russia', 'china', 'war'])
+        }
+        
+        for cat, matcher in categories.items():
+            match = next((m for m in markets if matcher(m.get('question', ''))), None)
+            if match:
+                test_markets.append({'category': cat, 'market': match})
+        
+        if not test_markets:
+            logger.warning("No suitable test markets found")
+            return
+        
+        logger.info(f"\n📊 Testing {len(test_markets)} diverse markets:")
+        for tm in test_markets:
+            logger.info(f"  - {tm['category'].upper()}: {tm['market']['question'][:60]}")
+        
+        logger.info(f"\n📰 Searching for news about key topics...")
         
         # Search for relevant news
         all_articles = []
-        keywords = ['fed', 'trump', 'election', 'interest', 'ukraine']
+        keywords = ['fed', 'trump', 'election', 'interest', 'ukraine', 'nba', 'bitcoin']
         
         for keyword in keywords:
-            articles = self.search_news(keyword, limit=10)
+            articles = self.search_news(keyword, limit=8)
             all_articles.extend(articles)
         
         # Remove duplicates
@@ -145,63 +172,63 @@ class FrontendMonitor:
                 seen_urls.add(url)
                 unique_articles.append(a)
         
-        logger.info(f"\n✓ Total unique articles: {len(unique_articles)}")
+        logger.info(f"✓ Retrieved {len(unique_articles)} unique articles")
         
-        # Analyze top articles against Fed market
-        logger.info(f"\n🔍 Analyzing news impact...")
-        
-        fed_market = next((m for m in markets if 'fed' in m.get('question', '').lower()), None)
-        if not fed_market:
-            logger.warning("No Fed market found")
-            return
-        
-        logger.info(f"Testing market: {fed_market.get('question', '')[:70]}")
+        logger.info(f"\n🔍 Analyzing news against test markets...")
         
         signals_generated = 0
         trades_executed = 0
         
-        # Analyze first 5 articles
-        for i, article in enumerate(unique_articles[:5]):
-            headline = article.get('title', '')
-            description = article.get('description', '')
-            source = article.get('source', 'Unknown')
+        # Test top 3 articles against each market
+        for tm in test_markets:
+            market = tm['market']
+            cat = tm['category']
+            logger.info(f"\n  📊 {cat.upper()} Market: {market['question'][:55]}")
             
-            logger.info(f"\n  [{i+1}/5] Analyzing: {headline[:60]}...")
-            
-            analysis = self.analyze_news(
-                headline=headline,
-                description=description,
-                source=source,
-                market_question=fed_market['question'],
-                keywords=['fed', 'rate', 'interest']
-            )
-            
-            if analysis:
-                impact = analysis.get('impact_score', 0)
-                direction = analysis.get('direction', 'NEUTRAL')
-                confidence = analysis.get('confidence', 0)
+            # Analyze 2 relevant articles
+            for i, article in enumerate(unique_articles[:3]):
+                headline = article.get('title', '')
+                description = article.get('description', '')
+                source = article.get('source', 'Unknown')
                 
-                logger.info(f"      Impact: {impact:.2f} | Direction: {direction} | Confidence: {confidence:.2f}")
+                logger.info(f"    [{i+1}/3] {headline[:50]}...")
                 
-                # Check thresholds (0.15 and 0.30)
-                if impact >= 0.15 and confidence >= 0.30 and direction != 'NEUTRAL':
-                    logger.info(f"      ✓ SIGNAL GENERATED! Placing paper trade...")
-                    signals_generated += 1
-                    side = 'yes' if direction.upper() == 'YES' else 'no'
-                    trade = self.quick_trade(fed_market['id'], side=side, size=25.0)
-                    if trade and trade.get('success'):
-                        trades_executed += 1
-                        t = trade.get('trade', {})
-                        logger.info(f"      🟢 TRADE OPENED: {t.get('side','?').upper()} ${t.get('size',0)} at {t.get('entry_price','?')}")
+                analysis = self.analyze_news(
+                    headline=headline,
+                    description=description,
+                    source=source,
+                    market_question=market['question'],
+                    keywords=[cat, 'news']
+                )
+                
+                if analysis:
+                    impact = analysis.get('impact_score', 0)
+                    direction = analysis.get('direction', 'NEUTRAL')
+                    confidence = analysis.get('confidence', 0)
+                    
+                    logger.info(f"        Impact: {impact:.2f} | Dir: {direction} | Conf: {confidence:.2f}")
+                    
+                    # Check thresholds (0.15 and 0.30)
+                    if impact >= 0.15 and confidence >= 0.30 and direction != 'NEUTRAL':
+                        logger.info(f"        ✓ SIGNAL! Placing trade...")
+                        signals_generated += 1
+                        side = 'yes' if direction.upper() == 'YES' else 'no'
+                        trade = self.quick_trade(market['id'], side=side, size=25.0)
+                        if trade and trade.get('success'):
+                            trades_executed += 1
+                            t = trade.get('trade', {})
+                            logger.info(f"        🟢 OPENED: {t.get('side','?').upper()} ${t.get('size',0)}")
+                            break  # One trade per market max
+                        else:
+                            logger.info(f"        ✗ Rejected (likely existing position)")
                     else:
-                        logger.info(f"      ✗ Trade not opened")
-                else:
-                    logger.info(f"      ✗ Below threshold (need impact≥0.15, conf≥0.30)")
+                        logger.info(f"        ✗ Below threshold")
         
         # Summary
         logger.info(f"\n" + "=" * 80)
         logger.info(f"RESULTS:")
-        logger.info(f"  Articles analyzed: {min(5, len(unique_articles))}")
+        logger.info(f"  Markets tested: {len(test_markets)}")
+        logger.info(f"  Articles analyzed: {min(len(unique_articles), len(test_markets) * 3)}")
         logger.info(f"  Signals generated: {signals_generated}")
         logger.info(f"  Trades executed: {trades_executed}")
         

@@ -577,17 +577,45 @@ Be precise and consider:
     def _execute_news_trade(self, signal: NewsSignal):
         """Execute a trade based on news signal"""
         try:
-            logger.info(f"🚀 Executing news-driven trade:")
+            logger.info(f"🚀 EXECUTING NEWS-DRIVEN TRADE:")
             logger.info(f"   Market: {signal.market_question[:70]}")
             logger.info(f"   Direction: {signal.direction}")
             logger.info(f"   Confidence: {signal.confidence:.2%}")
-            logger.info(f"   News: {signal.news_headline[:80]}")
+            logger.info(f"   Impact Score: {signal.impact_score:.2f}")
+            logger.info(f"   News Source: {signal.news_source}")
+            logger.info(f"   Headline: {signal.news_headline[:80]}")
             
-            # TODO: Implement actual trade execution
-            # position_size = self.calculate_position_size(signal.confidence, ...)
-            # self.client.place_order(...)
+            # Calculate position size based on confidence
+            position_size = self.calculate_position_size(
+                signal.confidence,
+                10000  # min liquidity
+            )
             
-            logger.info(f"   ✅ Trade executed successfully")
+            logger.info(f"   Position Size: ${position_size:.2f}")
+            
+            # Execute trade through Polymarket client
+            if hasattr(self, 'client') and self.client:
+                try:
+                    # Place order on Polymarket
+                    order_result = self.client.place_order(
+                        market_id=signal.market_id,
+                        outcome=signal.direction,  # YES or NO
+                        size=position_size,
+                        price=None,  # Market order
+                        dry_run=True  # Paper trading mode
+                    )
+                    
+                    logger.info(f"   ✅ Trade executed successfully!")
+                    if order_result:
+                        logger.info(f"   Order ID: {order_result.get('id', 'N/A')}")
+                        logger.info(f"   Status: {order_result.get('status', 'placed')}")
+                except Exception as trade_error:
+                    logger.error(f"   ❌ Trade execution failed: {trade_error}")
+                    # Log the signal anyway for analysis
+                    logger.info(f"   (Logged as paper trade signal)")
+            else:
+                # Fallback: just log as signal for analysis
+                logger.info(f"   ✅ Trade signal logged (no client available)")
             
         except Exception as e:
             logger.error(f"Failed to execute trade: {e}")

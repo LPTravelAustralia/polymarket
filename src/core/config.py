@@ -78,8 +78,8 @@ class Config(BaseSettings):
     news_max_age_hours: int = Field(default=72)  # 72 hours (NewsAPI free tier has ~24h delay)
     news_use_twitter: bool = Field(default=False)
     
-        # Backend Configuration (for news monitor to use backend APIs)
-        backend_url: str = Field(default="http://34.29.163.176:8000")  # GCloud VM backend
+    # Backend Configuration (for news monitor to use backend APIs)
+    backend_url: str = Field(default="http://34.29.163.176:8000")  # GCloud VM backend
     
     # Twitter/X Configuration
     twitter_bearer_token: Optional[str] = Field(default=None)

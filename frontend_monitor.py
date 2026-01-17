@@ -130,34 +130,38 @@ class FrontendMonitor:
             logger.error("No markets available")
             return
         
-        # Select diverse test markets
+        # Select diverse test markets - test MORE markets for better coverage
         test_markets = []
         categories = {
             'fed': lambda q: 'fed' in q.lower() and 'interest' in q.lower(),
-            'sports': lambda q: any(w in q.lower() for w in ['nba', 'nfl', 'championship', 'super bowl']),
-            'politics': lambda q: any(w in q.lower() for w in ['trump', 'election', 'president']),
-            'crypto': lambda q: any(w in q.lower() for w in ['bitcoin', 'btc', 'crypto', 'eth']),
-            'world': lambda q: any(w in q.lower() for w in ['ukraine', 'russia', 'china', 'war'])
+            'sports': lambda q: any(w in q.lower() for w in ['nba', 'nfl', 'championship', 'super bowl', 'win', 'playoff']),
+            'politics': lambda q: any(w in q.lower() for w in ['trump', 'election', 'president', 'democrat', 'republican']),
+            'crypto': lambda q: any(w in q.lower() for w in ['bitcoin', 'btc', 'crypto', 'eth', 'crypto']),
+            'world': lambda q: any(w in q.lower() for w in ['ukraine', 'russia', 'china', 'war', 'ceasefire', 'conflict'])
         }
         
+        # Get up to 3 markets per category instead of just 1
         for cat, matcher in categories.items():
-            match = next((m for m in markets if matcher(m.get('question', ''))), None)
-            if match:
+            matches = [m for m in markets if matcher(m.get('question', ''))][:3]
+            for match in matches:
                 test_markets.append({'category': cat, 'market': match})
+        
+        # Limit total to avoid too long runs, but test many more
+        test_markets = test_markets[:12]
         
         if not test_markets:
             logger.warning("No suitable test markets found")
             return
         
-        logger.info(f"\n📊 Testing {len(test_markets)} diverse markets:")
+        logger.info(f"\n📊 Testing {len(test_markets)} markets across {len(categories)} categories:")
         for tm in test_markets:
             logger.info(f"  - {tm['category'].upper()}: {tm['market']['question'][:60]}")
         
         # Define market-specific keywords for targeted searches
         market_keywords = {
             'fed': ['federal reserve', 'fed meeting', 'interest rates', 'jerome powell'],
-            'sports': ['nba', 'nfl', 'super bowl', 'championship'],
-            'politics': ['trump', 'election', 'biden', 'congress'],
+            'sports': ['nba', 'nfl', 'super bowl', 'championship', 'playoffs'],
+            'politics': ['trump', 'election', 'biden', 'congress', 'senate'],
             'crypto': ['bitcoin', 'ethereum', 'crypto', 'blockchain'],
             'world': ['ukraine', 'russia', 'china', 'international']
         }
@@ -171,14 +175,15 @@ class FrontendMonitor:
         for tm in test_markets:
             market = tm['market']
             cat = tm['category']
-            logger.info(f"\n  📊 {cat.upper()} Market: {market['question'][:55]}")
+            logger.info(f"\n  📊 {cat.upper()}: {market['question'][:55]}")
             
             # Get articles relevant to this market category
             keywords_for_market = market_keywords.get(cat, [cat])
             articles_for_market = []
             
-            for keyword in keywords_for_market[:2]:  # Search 2 keywords per market
-                articles = self.search_news(keyword, limit=3)
+            # Search more aggressively - 3 keywords per market, 4 articles each
+            for keyword in keywords_for_market[:3]:
+                articles = self.search_news(keyword, limit=4)
                 articles_for_market.extend(articles)
             
             # Remove duplicates
@@ -190,15 +195,15 @@ class FrontendMonitor:
                     seen_urls.add(url)
                     unique_market_articles.append(a)
             
-            logger.info(f"    Found {len(unique_market_articles)} relevant articles")
+            logger.info(f"    {len(unique_market_articles)} articles")
             
-            # Analyze top 3 relevant articles for this market
-            for i, article in enumerate(unique_market_articles[:3]):
+            # Analyze up to 4 articles (more chances for signal)
+            for i, article in enumerate(unique_market_articles[:4]):
                 headline = article.get('title', '')
                 description = article.get('description', '')
                 source = article.get('source', 'Unknown')
                 
-                logger.info(f"    [{i+1}/3] {headline[:50]}...")
+                logger.info(f"    [{i+1}] {headline[:45]}...")
                 
                 analysis = self.analyze_news(
                     headline=headline,

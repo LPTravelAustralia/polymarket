@@ -20,7 +20,8 @@ def get_open_positions():
         resp = httpx.get(f"{BACKEND_URL}/api/bot/portfolio", timeout=TIMEOUT)
         if resp.status_code == 200:
             portfolio = resp.json()
-            return portfolio.get('open_trades', [])
+            # API returns 'positions' (current snapshots) not 'open_trades'
+            return portfolio.get('positions', [])
     except Exception as e:
         logger.error(f"Failed to get positions: {e}")
     return []
@@ -62,7 +63,8 @@ def auto_close_old_positions(age_minutes: int = 3):
     total_pnl = 0.0
     
     for pos in positions:
-        opened_str = pos.get('timestamp', pos.get('opened_at', ''))
+        # Use 'last_update' field (not 'timestamp' which is in trades)
+        opened_str = pos.get('last_update', pos.get('timestamp', ''))
         if not opened_str:
             continue
         

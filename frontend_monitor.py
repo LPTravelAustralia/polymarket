@@ -153,40 +153,47 @@ class FrontendMonitor:
         for tm in test_markets:
             logger.info(f"  - {tm['category'].upper()}: {tm['market']['question'][:60]}")
         
-        logger.info(f"\n📰 Searching for news about key topics...")
+        # Define market-specific keywords for targeted searches
+        market_keywords = {
+            'fed': ['federal reserve', 'fed meeting', 'interest rates', 'jerome powell'],
+            'sports': ['nba', 'nfl', 'super bowl', 'championship'],
+            'politics': ['trump', 'election', 'biden', 'congress'],
+            'crypto': ['bitcoin', 'ethereum', 'crypto', 'blockchain'],
+            'world': ['ukraine', 'russia', 'china', 'international']
+        }
         
-        # Search for relevant news
-        all_articles = []
-        keywords = ['fed', 'trump', 'election', 'interest', 'ukraine', 'nba', 'bitcoin']
-        
-        for keyword in keywords:
-            articles = self.search_news(keyword, limit=8)
-            all_articles.extend(articles)
-        
-        # Remove duplicates
-        seen_urls = set()
-        unique_articles = []
-        for a in all_articles:
-            url = a.get('url', a.get('title', ''))
-            if url not in seen_urls:
-                seen_urls.add(url)
-                unique_articles.append(a)
-        
-        logger.info(f"✓ Retrieved {len(unique_articles)} unique articles")
-        
-        logger.info(f"\n🔍 Analyzing news against test markets...")
+        logger.info(f"\n🔍 Analyzing news against test markets (market-specific keywords)...")
         
         signals_generated = 0
         trades_executed = 0
         
-        # Test top 3 articles against each market
+        # Analyze each market with its own relevant articles
         for tm in test_markets:
             market = tm['market']
             cat = tm['category']
             logger.info(f"\n  📊 {cat.upper()} Market: {market['question'][:55]}")
             
-            # Analyze 2 relevant articles
-            for i, article in enumerate(unique_articles[:3]):
+            # Get articles relevant to this market category
+            keywords_for_market = market_keywords.get(cat, [cat])
+            articles_for_market = []
+            
+            for keyword in keywords_for_market[:2]:  # Search 2 keywords per market
+                articles = self.search_news(keyword, limit=3)
+                articles_for_market.extend(articles)
+            
+            # Remove duplicates
+            seen_urls = set()
+            unique_market_articles = []
+            for a in articles_for_market:
+                url = a.get('url', a.get('title', ''))
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    unique_market_articles.append(a)
+            
+            logger.info(f"    Found {len(unique_market_articles)} relevant articles")
+            
+            # Analyze top 3 relevant articles for this market
+            for i, article in enumerate(unique_market_articles[:3]):
                 headline = article.get('title', '')
                 description = article.get('description', '')
                 source = article.get('source', 'Unknown')
@@ -228,7 +235,6 @@ class FrontendMonitor:
         logger.info(f"\n" + "=" * 80)
         logger.info(f"RESULTS:")
         logger.info(f"  Markets tested: {len(test_markets)}")
-        logger.info(f"  Articles analyzed: {min(len(unique_articles), len(test_markets) * 3)}")
         logger.info(f"  Signals generated: {signals_generated}")
         logger.info(f"  Trades executed: {trades_executed}")
         

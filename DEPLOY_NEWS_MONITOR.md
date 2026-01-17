@@ -59,7 +59,21 @@ nano .env  # Or vi .env
 # ANTHROPIC_API_KEY=your_key
 # TWITTER_BEARER_TOKEN=your_key (optional)
 
-# 6. Test the news monitor locally on VM
+# 6. Start/restart the backend with environment variables
+# IMPORTANT: Must run from ~/polymarket root, not backend/ subdirectory
+pkill -f "uvicorn.*backend.main:app"  # Kill old backend
+
+cd ~/polymarket
+set -a
+source .env
+set +a
+nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > backend/backend.log 2>&1 &
+
+# Verify backend has API keys loaded
+curl http://localhost:8000/api/health
+# Should show: "anthropic_key":true, "newsapi_key":true
+
+# 7. Test the news monitor locally on VM
 python3 scripts/run_news_monitor.py --once --dry-run
 
 # 7. If test passes, run continuously

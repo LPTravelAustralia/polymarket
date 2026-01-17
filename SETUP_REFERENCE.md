@@ -40,6 +40,26 @@
 
 ---
 
+## Backend Startup (GCloud VM)
+
+**Critical:** Backend must be started from `~/polymarket` root directory to load `.env` file:
+
+```bash
+cd ~/polymarket
+
+# Load environment variables
+set -a
+source .env
+set +a
+
+# Start backend (note: backend.main not main)
+nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > backend/backend.log 2>&1 &
+
+# Verify API keys loaded
+curl http://localhost:8000/api/health
+# Must show: "anthropic_key":true, "newsapi_key":true
+```
+
 ## Architecture Overview
 
 ```

@@ -1852,6 +1852,21 @@ class SearchResponse(BaseModel):
     query: str
 
 
+class NewsAnalysisRequest(BaseModel):
+    headline: str
+    description: Optional[str] = None
+    source: str
+    market_question: str
+    keywords: List[str]
+
+
+class NewsAnalysisResponse(BaseModel):
+    impact_score: float
+    direction: str  # 'YES', 'NO', or 'NEUTRAL'
+    confidence: float
+    reasoning: str
+
+
 @app.get("/api/news")
 async def get_news(query: str, limit: int = 10):
     """
@@ -1930,6 +1945,113 @@ async def get_market_news(market_id: str, limit: int = 5):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/news/analyze", response_model=NewsAnalysisResponse)
+async def analyze_news(request: NewsAnalysisRequest):
+    """
+    Analyze news impact on a market using Claude AI.
+    Backend has Anthropic API configured, so news monitor can use this.
+    """
+    try:
+        # Use Superforecaster agent or direct Claude if available
+        agent = _get_superforecaster_agent()
+        
+        if agent and ANTHROPIC_API_KEY:
+            # Use the superforecaster for analysis
+            prompt = f"""You are a prediction market analyst. Analyze how this news affects the probability of the following market outcome.
+
+MARKET QUESTION: {request.market_question}
+
+NEWS HEADLINE: {request.headline}
+SOURCE: {request.source}
+DESCRIPTION: {request.description or 'N/A'}
+
+MATCHED KEYWORDS: {', '.join(request.keywords)}
+
+Provide your analysis in this exact format:
+IMPACT: [0.0-1.0] (how much this news affects the market)
+DIRECTION: [YES/NO/NEUTRAL] (does this make YES more likely, NO more likely, or neutral?)
+CONFIDENCE: [0.0-1.0] (how confident are you in this analysis?)
+REASONING: [2-3 sentence explanation]
+
+Be precise and consider:
+1. Is the news directly relevant to the market outcome?
+2. Is it breaking news or just speculation?
+3. Does it provide new information?
+4. What is the credibility of the source?"""
+
+            import anthropic as anthropic_lib
+            client = anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
+            
+            response = client.messages.create(
+                model=ANTHROPIC_MODEL,
+                max_tokens=400,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            content = response.content[0].text
+            
+            # Parse response
+            impact = 0.65
+            direction = 'NEUTRAL'
+            confidence = 0.55
+            reasoning = ""
+            
+            for line in content.split('\n'):
+                line = line.strip()
+                if line.startswith('IMPACT:'):
+                    try:
+                        impact = float(line.split(':')[1].strip().split()[0])
+                        impact = max(0.0, min(1.0, impact))  # Clamp to [0, 1]
+                    except:
+                        pass
+                elif line.startswith('DIRECTION:'):
+                    dir_text = line.split(':')[1].strip().upper()
+                    if 'YES' in dir_text:
+                        direction = 'YES'
+                    elif 'NO' in dir_text:
+                        direction = 'NO'
+                    else:
+                        direction = 'NEUTRAL'
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.split(':')[1].strip().split()[0])
+                        confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
+                    except:
+                        pass
+                elif line.startswith('REASONING:'):
+                    reasoning = line.split(':', 1)[1].strip()
+            
+            return NewsAnalysisResponse(
+                impact_score=impact,
+                direction=direction,
+                confidence=confidence,
+                reasoning=reasoning or "Analysis complete"
+            )
+        else:
+            # Fallback: keyword-based scoring
+            impact = min(0.95, 0.65 + len(request.keywords) * 0.15)
+            confidence = min(0.85, 0.55 + len(request.keywords) * 0.15)
+            return NewsAnalysisResponse(
+                impact_score=impact,
+                direction='NEUTRAL',
+                confidence=confidence,
+                reasoning="Fallback: keyword-based scoring"
+            )
+            
+    except Exception as e:
+        logger.error(f"News analysis error: {e}")
+        # Always return fallback analysis
+        impact = min(0.95, 0.65 + len(request.keywords) * 0.15)
+        confidence = min(0.85, 0.55 + len(request.keywords) * 0.15)
+        return NewsAnalysisResponse(
+            impact_score=impact,
+            direction='NEUTRAL',
+            confidence=confidence,
+            reasoning=f"Fallback: {str(e)[:50]}"
+        )
 
 
 @app.get("/api/search")

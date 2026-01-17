@@ -24,7 +24,6 @@ from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections import defaultdict
-import anthropic
 import httpx
 
 from src.core.config import Config
@@ -87,11 +86,9 @@ class NewsMonitorAgent(BaseAgent):
         # Initialize connectors
         self.news_connector = NewsConnector()
         
-        # Claude AI for analysis
-        self.anthropic_key = config.anthropic_api_key
-        self.claude_client = None
-        if self.anthropic_key:
-            self.claude_client = anthropic.Anthropic(api_key=self.anthropic_key)
+        # Backend API for analysis (Claude runs on backend)
+        self.backend_url = getattr(config, 'backend_url', 'http://localhost:8000')
+        self.http_client = httpx.Client(timeout=30.0)
         
         # Configuration
         self.monitoring_interval = getattr(config, 'news_monitoring_interval', 300)  # 5 min default
@@ -106,7 +103,8 @@ class NewsMonitorAgent(BaseAgent):
         self.last_update = None
         self.claude_failures = 0  # Track Claude API failures
         
-        logger.info(f"NewsMonitorAgent initialized - checking every {self.monitoring_interval}s")
+        logger.info(f"NewsMonitorAgent initialized - backend: {self.backend_url}")
+        logger.info(f"NewsMonitorAgent checking every {self.monitoring_interval}s")
     
     def _extract_market_keywords(self, question: str, market_id: str) -> MarketKeywords:
         """
@@ -249,92 +247,51 @@ class NewsMonitorAgent(BaseAgent):
         matched_keywords: List[str]
     ) -> Tuple[float, str, float, str]:
         """
-        Use Claude AI to analyze how the news impacts the market
+        Use backend API to analyze how the news impacts the market via Claude
         
         Returns:
             (impact_score, direction, confidence, reasoning)
         """
-        if not self.claude_client:
-            # Fallback: keyword-based scoring with improved calculation
-            # With 1+ matching keywords: impact 0.65-0.95, confidence 0.55-0.85
-            impact = min(0.95, 0.65 + len(matched_keywords) * 0.15)
-            confidence = min(0.85, 0.55 + len(matched_keywords) * 0.15)
-            logger.debug(f"Claude API unavailable, using fallback scoring")
-            return impact, 'NEUTRAL', confidence, "Fallback: AI unavailable (keyword-based scoring)"
-        
         try:
-            prompt = f"""You are a prediction market analyst. Analyze how this news affects the probability of the following market outcome.
-
-MARKET QUESTION: {market_question}
-
-NEWS HEADLINE: {article.title}
-SOURCE: {article.source}
-PUBLISHED: {article.published_at}
-DESCRIPTION: {article.description or 'N/A'}
-
-MATCHED KEYWORDS: {', '.join(matched_keywords)}
-
-Provide your analysis in this exact format:
-IMPACT: [0.0-1.0] (how much this news affects the market)
-DIRECTION: [YES/NO/NEUTRAL] (does this make YES more likely, NO more likely, or neutral?)
-CONFIDENCE: [0.0-1.0] (how confident are you in this analysis?)
-REASONING: [2-3 sentence explanation]
-
-Be precise and consider:
-1. Is the news directly relevant to the market outcome?
-2. Is it breaking news or just speculation?
-3. Does it provide new information?
-4. What is the credibility of the source?"""
-
-            logger.debug(f"Analyzing news impact with Claude AI...")
-            response = self.claude_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=400,
-                temperature=0.3,
-                timeout=30.0,  # Add 30 second timeout
-                messages=[{"role": "user", "content": prompt}]
+            # Use backend API for AI analysis
+            # Backend has Claude configured and will analyze the news impact
+            payload = {
+                "headline": article.title,
+                "description": article.description or "",
+                "source": article.source,
+                "market_question": market_question,
+                "keywords": matched_keywords
+            }
+            
+            logger.debug(f"Analyzing news via backend API...")
+            response = self.http_client.post(
+                f"{self.backend_url}/api/news/analyze",
+                json=payload,
+                timeout=30.0
             )
             
-            content = response.content[0].text
-            
-            # Parse response
-            impact = 0.5
-            direction = 'NEUTRAL'
-            confidence = 0.5
-            reasoning = ""
-            
-            for line in content.split('\n'):
-                line = line.strip()
-                if line.startswith('IMPACT:'):
-                    try:
-                        impact = float(line.split(':')[1].strip().split()[0])
-                    except:
-                        pass
-                elif line.startswith('DIRECTION:'):
-                    dir_text = line.split(':')[1].strip().upper()
-                    if 'YES' in dir_text:
-                        direction = 'YES'
-                    elif 'NO' in dir_text:
-                        direction = 'NO'
-                    else:
-                        direction = 'NEUTRAL'
-                elif line.startswith('CONFIDENCE:'):
-                    try:
-                        confidence = float(line.split(':')[1].strip().split()[0])
-                    except:
-                        pass
-                elif line.startswith('REASONING:'):
-                    reasoning = line.split(':', 1)[1].strip()
-            
-            return impact, direction, confidence, reasoning or "Analysis complete"
-            
+            if response.status_code == 200:
+                data = response.json()
+                impact = float(data.get('impact_score', 0.65))
+                direction = data.get('direction', 'NEUTRAL')
+                confidence = float(data.get('confidence', 0.55))
+                reasoning = data.get('reasoning', 'Backend analysis')
+                
+                logger.debug(f"Backend analysis: impact={impact:.2f}, conf={confidence:.2f}, dir={direction}")
+                return impact, direction, confidence, reasoning
+            else:
+                logger.warning(f"Backend API error: {response.status_code}")
+                
         except Exception as e:
             self.claude_failures += 1
-            logger.debug(f"Claude API error: {e} (failures: {self.claude_failures})")
-            # Use improved fallback scoring instead of failing
-            impact = min(0.95, 0.65 + len(matched_keywords) * 0.15)
-            confidence = min(0.85, 0.55 + len(matched_keywords) * 0.15)
-            return impact, 'NEUTRAL', confidence, f"Fallback: AI error - {str(e)[:30]}"
+            logger.debug(f"Backend API error: {e} (failures: {self.claude_failures})")
+        
+        # Fallback: keyword-based scoring with improved calculation
+        # With 1+ matching keywords: impact 0.65-0.95, confidence 0.55-0.85
+        impact = min(0.95, 0.65 + len(matched_keywords) * 0.15)
+        confidence = min(0.85, 0.55 + len(matched_keywords) * 0.15)
+        logger.debug(f"Using fallback scoring: impact={impact:.2f}, conf={confidence:.2f}")
+        return impact, 'NEUTRAL', confidence, "Fallback: keyword-based scoring"
     
     def _check_twitter_trends(self, keywords: List[str]) -> float:
         """

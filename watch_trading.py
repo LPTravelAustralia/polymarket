@@ -8,7 +8,9 @@ import json
 import time
 from datetime import datetime
 
-BASE_URL = "http://localhost:8000"
+import os
+
+BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 class TradingMonitor:
     def __init__(self):

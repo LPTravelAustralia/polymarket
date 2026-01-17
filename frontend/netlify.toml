@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_PUBLIC_API_URL = "https://bot.travorro.com"
+  NEXT_PUBLIC_WS_URL = "wss://bot.travorro.com/ws"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Proxy API requests to the backend
+[[redirects]]
+  from = "/api/*"
+  to = "https://bot.travorro.com/api/:splat"
+  status = 200
+  force = true

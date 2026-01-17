@@ -1,0 +1,17 @@
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Proxy API requests to the backend to keep browser calls same-origin over HTTPS
+[[redirects]]
+  from = "/api/*"
+  to = "http://34.29.163.176:8000/api/:splat"
+  status = 200
+  force = true

@@ -101,17 +101,26 @@ class MakerStrategy:
                      f"[{p.min_price}, {p.max_price}]"]
             )
 
+        # Thresholds may be absolute (prediction markets, where price IS a
+        # probability) or fractional (anything quoted in currency). Resolve
+        # to absolute once, here, so the rest of the method is unit-agnostic.
+        scale = fair.price if p.relative_thresholds else 1.0
+        floor_half_spread = p.base_half_spread * scale
+        min_edge = p.min_edge_per_share * scale
+        adverse = p.adverse_selection_per_share * scale
+        skew_max = p.inventory_skew_max * scale
+
         # Required half-width: the wider of our configured floor and our own
         # model uncertainty. Quoting tighter than your error bar is how a
         # maker gets picked off.
-        half_spread = max(p.base_half_spread, fair.uncertainty * p.uncertainty_multiplier)
+        half_spread = max(floor_half_spread, fair.uncertainty * p.uncertainty_multiplier)
 
         # Inventory skew: long inventory pushes both quotes down, so we are
         # more likely to sell and less likely to buy more.
         utilisation = 0.0
         if max_inventory_shares > 0:
             utilisation = max(-1.0, min(1.0, inventory_shares / max_inventory_shares))
-        skew = -utilisation * p.inventory_skew_max
+        skew = -utilisation * skew_max
         centre = fair.price + skew
 
         raw_bid = centre - half_spread
@@ -127,12 +136,13 @@ class MakerStrategy:
             skipped.append("at long inventory limit, not bidding")
         else:
             bid = min(bid, book.best_ask - tick)  # never cross
-            edge = fair.price - bid - p.adverse_selection_per_share
+            edge = fair.price - bid - adverse
             if bid < tick:
                 skipped.append("bid rounds below one tick")
-            elif edge < p.min_edge_per_share:
+            elif edge < min_edge:
                 skipped.append(
-                    f"bid edge {edge * 100:.2f}c < required {p.min_edge_per_share * 100:.2f}c"
+                    f"bid edge {edge / scale * 100:.3f}% < required "
+                    f"{min_edge / scale * 100:.3f}%"
                 )
             else:
                 size = self._size_for(book, "BUY", p.order_size_shares)
@@ -149,12 +159,15 @@ class MakerStrategy:
             skipped.append("at short inventory limit, not offering")
         else:
             ask = max(ask, book.best_bid + tick)  # never cross
-            edge = ask - fair.price - p.adverse_selection_per_share
-            if ask > 1.0 - tick:
+            edge = ask - fair.price - adverse
+            # The 1.0 ceiling is a probability bound and applies only when a
+            # finite max_price says we are on a prediction market.
+            if math.isfinite(p.max_price) and ask > 1.0 - tick:
                 skipped.append("ask rounds above one tick from 1.0")
-            elif edge < p.min_edge_per_share:
+            elif edge < min_edge:
                 skipped.append(
-                    f"ask edge {edge * 100:.2f}c < required {p.min_edge_per_share * 100:.2f}c"
+                    f"ask edge {edge / scale * 100:.3f}% < required "
+                    f"{min_edge / scale * 100:.3f}%"
                 )
             else:
                 size = self._size_for(book, "SELL", p.order_size_shares)
@@ -193,4 +206,7 @@ class MakerStrategy:
     def should_requote(self, existing_price: float, new_price: float) -> bool:
         """Churning orders costs nothing in fees but loses queue position,
         which on a passive strategy is most of the value."""
-        return abs(existing_price - new_price) >= self.params.requote_threshold
+        threshold = self.params.requote_threshold
+        if self.params.relative_thresholds and existing_price:
+            threshold *= abs(existing_price)
+        return abs(existing_price - new_price) >= threshold

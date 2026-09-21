@@ -109,8 +109,43 @@ class MakerParams:
 
     # Only quote inside this price band. Outside it the fee is cheap but the
     # payoff is highly asymmetric and model error dominates.
+    #
+    # These are PROBABILITY bounds and only make sense on a prediction
+    # market. Set max_price to inf for an asset quoted in dollars.
     min_price: float = 0.05
     max_price: float = 0.95
+
+    # When True, `base_half_spread`, `min_edge_per_share` and
+    # `adverse_selection_per_share` are read as FRACTIONS OF PRICE rather
+    # than absolute amounts.
+    #
+    # This exists because absolute thresholds are a prediction-market
+    # assumption: on a 0-1 probability scale 0.010 means one cent and also
+    # one percent, and those coincide. On a perp they do not -- 0.010 is
+    # 1% of a $1 token and 0.00001% of BTC. The first live run on
+    # Hyperliquid quoted DYDX 9% below the market because of exactly this.
+    relative_thresholds: bool = False
+
+    @classmethod
+    def for_perps(cls, **overrides) -> "MakerParams":
+        """Defaults sane for an asset quoted in dollars.
+
+        Values are fractions of price: 10bp half-spread, 5bp minimum edge,
+        8bp assumed adverse selection. The adverse-selection figure is still
+        a placeholder and still needs measuring per venue.
+        """
+        base = dict(
+            base_half_spread=0.0010,
+            min_edge_per_share=0.0005,
+            adverse_selection_per_share=0.0008,
+            inventory_skew_max=0.0015,
+            min_price=0.0,
+            max_price=float("inf"),
+            relative_thresholds=True,
+            requote_threshold=0.0003,
+        )
+        base.update(overrides)
+        return cls(**base)
 
     # Re-quote when fair value moves more than this.
     requote_threshold: float = 0.003

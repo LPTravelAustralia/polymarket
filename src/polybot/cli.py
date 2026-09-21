@@ -156,6 +156,88 @@ def cmd_shock(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_hl_quote(args: argparse.Namespace, settings: Settings) -> int:
+    """Dry-run the existing maker strategy against live Hyperliquid books."""
+    from .strategy.fair_value import MicropriceModel
+    from .strategy.maker import MakerStrategy
+    from .venues.hl_market import HyperliquidMarketData
+
+    md = HyperliquidMarketData()
+    try:
+        coins = (
+            [c.strip().upper() for c in args.coins.split(",") if c.strip()]
+            if args.coins else md.universe(limit=args.limit)
+        )
+        if not coins:
+            log.error("No symbols available -- check access to api.hyperliquid.xyz")
+            return 1
+
+        from .config import MakerParams
+
+        fees = md.fee_schedule(args.address or None)
+        # Perp defaults: thresholds as fractions of price, no probability
+        # bounds. Using the prediction-market defaults here quotes DYDX 9%
+        # below the market and rejects BTC outright.
+        params = MakerParams.for_perps(order_size_shares=settings.maker.order_size_shares)
+        model = MicropriceModel(min_uncertainty=0.0002, relative=True)
+        maker = MakerStrategy(params)
+
+        print(f"Fee tier: taker {fees.taker_rate * 100:.4f}%  "
+              f"maker {fees.maker_rate * 100:.4f}%"
+              + ("  (REBATE)" if fees.maker_is_rebated else ""))
+        print(f"Strategy: min edge {params.min_edge_per_share * 100:.3f}%, "
+              f"adverse selection {params.adverse_selection_per_share * 100:.3f}%")
+        print()
+        print(f"{'symbol':<10} {'bid':>12} {'ask':>12} {'spread':>9} "
+              f"{'fair':>12} {'action':>28}")
+        print("-" * 90)
+
+        quoted = skipped = 0
+        for coin in coins:
+            book = md.book(coin)
+            if book is None or book.best_bid is None:
+                print(f"{coin:<10} {'no book':>12}")
+                continue
+
+            spread_pct = (book.spread / book.mid * 100) if book.mid else 0.0
+            fair = model.estimate(coin, book)
+            if fair is None:
+                print(f"{coin:<10} {book.best_bid:>12.4f} {book.best_ask:>12.4f} "
+                      f"{spread_pct:>8.3f}% {'-':>12} {'no fair value':>28}")
+                continue
+
+            # The strategy is used unmodified. Inventory is assumed flat, so
+            # only the bid side is quoted -- it does not short.
+            decision = maker.quote(
+                coin, book, fair, fees,
+                inventory_shares=0.0,
+                max_inventory_shares=args.max_size,
+                tick=book.tick_size,
+            )
+            if decision.quotes:
+                quoted += 1
+                for q in decision.quotes:
+                    edge_pct = q.edge_per_share / fair.price * 100
+                    action = f"{q.side} {q.size:g} @ {q.price:.4f} (+{edge_pct:.3f}%)"
+                    print(f"{coin:<10} {book.best_bid:>12.4f} {book.best_ask:>12.4f} "
+                          f"{spread_pct:>8.3f}% {fair.price:>12.4f} {action:>28}")
+            else:
+                skipped += 1
+                why = decision.skipped[0][:28] if decision.skipped else "no quote"
+                print(f"{coin:<10} {book.best_bid:>12.4f} {book.best_ask:>12.4f} "
+                      f"{spread_pct:>8.3f}% {fair.price:>12.4f} {why:>28}")
+
+        print("-" * 90)
+        print(f"would quote {quoted}, declined {skipped}")
+        print()
+        print("NOTE: MicropriceModel has NO informational edge by construction.")
+        print("These quotes capture spread only. A high decline rate here is the")
+        print("strategy correctly refusing to quote inside its own uncertainty.")
+    finally:
+        md.close()
+    return 0
+
+
 def cmd_markets(args: argparse.Namespace, settings: Settings) -> int:
     from .clients.gamma import GammaAPI
 
@@ -408,6 +490,14 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--cost", type=float, default=0.001,
                     help="round-trip cost as a fraction (0.001 = 0.10%%)")
     sh.set_defaults(func=cmd_shock)
+
+    hq = sub.add_parser("hl-quote",
+                        help="dry-run the maker strategy on live Hyperliquid books")
+    hq.add_argument("--coins", default="", help="comma list; default = top universe")
+    hq.add_argument("--limit", type=int, default=20)
+    hq.add_argument("--address", default="", help="your address, for a real fee tier")
+    hq.add_argument("--max-size", type=float, default=100.0)
+    hq.set_defaults(func=cmd_hl_quote)
 
     hlp = sub.add_parser("hl-profile", help="profile one Hyperliquid address")
     hlp.add_argument("wallet")

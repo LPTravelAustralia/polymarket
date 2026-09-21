@@ -50,7 +50,15 @@ class FairValue:
 
     @property
     def is_usable(self) -> bool:
-        return 0.0 < self.price < 1.0 and self.uncertainty >= 0.0
+        """Any positive price with a non-negative error bar.
+
+        This deliberately does NOT require 0 < price < 1. It used to, which
+        was a prediction-market assumption hiding in what looked like generic
+        code: every perp quoted above $1 -- BTC, ETH, SOL -- was rejected as
+        "unusable" the first time this ran on Hyperliquid. Probability bounds
+        belong to the prediction-market strategy config, not to the type.
+        """
+        return self.price > 0.0 and self.uncertainty >= 0.0
 
 
 class FairValueModel(Protocol):
@@ -64,20 +72,36 @@ class MicropriceModel:
     machinery works, then replace it.
     """
 
-    def __init__(self, shrink: float = 0.0, min_uncertainty: float = 0.008):
+    def __init__(
+        self,
+        shrink: float = 0.0,
+        min_uncertainty: float = 0.008,
+        *,
+        relative: bool = False,
+    ):
         self.shrink = shrink
+        # Absolute on a 0-1 probability scale; a fraction of price when
+        # `relative`. An absolute floor of 0.008 means "0.8 probability
+        # points" on a prediction market and "0.8 cents" on BTC, which is
+        # effectively zero and would have the model claim false precision.
         self.min_uncertainty = min_uncertainty
+        self.relative = relative
 
     def estimate(self, token_id: str, book: Book) -> FairValue | None:
         mp = book.microprice()
-        if mp is None:
+        if mp is None or mp <= 0:
             return None
 
-        price = mp * (1 - self.shrink) + 0.5 * self.shrink
+        # Shrinking toward 0.5 is a probability-space operation; it is
+        # meaningless for an asset quoted in currency.
+        price = mp * (1 - self.shrink) + 0.5 * self.shrink if self.shrink else mp
 
         # Wider book => less certain. Half-spread is a sane floor for error.
-        spread = book.spread or 0.02
-        uncertainty = max(self.min_uncertainty, spread / 2.0)
+        spread = book.spread
+        if spread is None:
+            spread = price * 0.02 if self.relative else 0.02
+        floor = self.min_uncertainty * (price if self.relative else 1.0)
+        uncertainty = max(floor, spread / 2.0)
 
         return FairValue(price=price, uncertainty=uncertainty, source="microprice")
 

@@ -28,6 +28,16 @@ class TestDepthResult:
         """A handful of fills must not produce a tradeable verdict."""
         assert not result(20, fills=5, gross=20.0, adverse=1.0).is_viable
 
+    def test_incoherent_row_is_rejected_however_good_it_looks(self):
+        """Most volume picked off AND ~zero adverse selection contradict each
+        other. The live sweep produced exactly this at 40bp -- 55% pickoff
+        with 0.22bp adverse -- and called it a +39.78bp edge.
+        """
+        r = result(40, fills=500, gross=40.0, adverse=0.22, pickoff=0.553)
+        assert r.net_bps > 39
+        assert not r.is_coherent
+        assert not r.is_viable
+
     def test_positive_and_well_sampled_is_viable(self):
         assert result(20, fills=200, gross=20.0, adverse=1.0).is_viable
 
@@ -78,7 +88,13 @@ class TestRender:
 
     def test_marks_thin_rows(self):
         s = DepthSweep(fee_bps=1.5, results=[result(5, fills=4)])
-        assert "(thin)" in render_sweep(s)
+        assert "thin (4)" in render_sweep(s)
+
+    def test_marks_incoherent_rows(self):
+        s = DepthSweep(fee_bps=1.5, results=[
+            result(40, fills=200, gross=40.0, adverse=0.2, pickoff=0.55),
+        ])
+        assert "INCOHERENT" in render_sweep(s)
 
     def test_zero_fill_rows_render(self):
         assert "0" in render_sweep(DepthSweep(results=[result(5, fills=0)]))

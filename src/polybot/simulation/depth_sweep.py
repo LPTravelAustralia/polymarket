@@ -46,13 +46,48 @@ class DepthResult:
     adverse_bps: float           # measured markout cost
     pickoff_share: float         # share of volume filled by price-through
 
+    # 30 fills is enough to reject noise around zero but nowhere near enough
+    # to trust a markout mean, whose variance at depth is enormous. The first
+    # live sweep called 47 fills "VIABLE" off an adverse-selection estimate
+    # that had collapsed from 18.22bp to 0.22bp between adjacent depths.
+    MIN_FILLS_FOR_VERDICT = 100
+
     @property
     def net_bps(self) -> float:
         return self.gross_edge_bps - self.adverse_bps
 
     @property
+    def is_coherent(self) -> bool:
+        """Does this row contradict itself?
+
+        Price-through fills are the adverse kind -- the market ran past the
+        quote and kept going. A row where most volume was picked off yet
+        adverse selection reads near zero is not a discovery, it is a
+        small-sample artifact, and the model says so elsewhere. Reporting it
+        as an edge would be the single most expensive mistake this tool
+        could make.
+        """
+        if self.fills == 0:
+            return False
+        return not (self.pickoff_share > 0.4 and self.adverse_bps < 2.0)
+
+    @property
     def is_viable(self) -> bool:
-        return self.fills >= 30 and self.net_bps > 0
+        return (
+            self.fills >= self.MIN_FILLS_FOR_VERDICT
+            and self.net_bps > 0
+            and self.is_coherent
+        )
+
+    @property
+    def warning(self) -> str:
+        if self.fills == 0:
+            return ""
+        if self.fills < self.MIN_FILLS_FOR_VERDICT:
+            return f"thin ({self.fills})"
+        if not self.is_coherent:
+            return "INCOHERENT: high pickoff but ~zero adverse"
+        return ""
 
 
 @dataclass
@@ -68,17 +103,25 @@ class DepthSweep:
     def verdict(self) -> str:
         b = self.best()
         if b is None:
-            deep = [r for r in self.results if r.fills >= 30]
+            deep = [r for r in self.results
+                    if r.fills >= DepthResult.MIN_FILLS_FOR_VERDICT]
             if not deep:
+                enough = [r for r in self.results if r.fills > 0]
+                detail = (
+                    f" Deepest usable row had {max(r.fills for r in enough)} fills, "
+                    f"below the {DepthResult.MIN_FILLS_FOR_VERDICT} needed."
+                    if enough else ""
+                )
                 return (
-                    "INCONCLUSIVE -- no depth produced enough fills to measure. "
-                    "Record longer or on more active markets."
+                    "INCONCLUSIVE -- no depth produced enough fills for a "
+                    f"verdict.{detail} Record longer or on more active markets."
                 )
             best_try = max(deep, key=lambda r: r.net_bps)
             return (
-                f"NO VIABLE DEPTH. Best was {best_try.depth_bps:.1f}bp out, "
-                f"netting {best_try.net_bps:+.2f}bp against a {self.fee_bps:.2f}bp "
-                "fee. Spread capture does not clear its costs here."
+                f"NO VIABLE DEPTH. Best well-sampled row was "
+                f"{best_try.depth_bps:.1f}bp out, netting {best_try.net_bps:+.2f}bp "
+                f"against a {self.fee_bps:.2f}bp fee. Spread capture does not "
+                "clear its costs here."
             )
         return (
             f"VIABLE at {b.depth_bps:.1f}bp from fair: captures "
@@ -166,7 +209,7 @@ def render_sweep(sweep: DepthSweep) -> str:
             lines.append(f"  {r.depth_bps:>7.1f}bp {'0':>8} {'-':>8} "
                          f"{'-':>9} {'-':>9} {'-':>9} {'-':>9}")
             continue
-        flag = "" if r.fills >= 30 else "  (thin)"
+        flag = f"  ({r.warning})" if r.warning else ""
         lines.append(
             f"  {r.depth_bps:>7.1f}bp {r.fills:>8,} {r.fill_rate:>7.1%} "
             f"{r.gross_edge_bps:>8.2f}bp {r.adverse_bps:>8.2f}bp "

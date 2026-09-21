@@ -254,6 +254,58 @@ trades on a venue with fees are losing trades.
 
 ---
 
+## Tested and rejected: trading news-driven shocks
+
+**The hypothesis.** News causes large swings in crypto, so there should be
+money in trading them.
+
+The first half is true and was never in question. The tradeable question is
+narrower: *once a shock has begun, does price keep moving (drift) or snap
+back (mean reversion)?* Drift means a slow participant can join the move and
+profit. Mean reversion means latecomers are the exit liquidity.
+
+**The test.** `polybot shock`, an event study on Hyperliquid candles.
+Shocks are identified from returns rather than from a news feed, which
+avoids three problems that wreck news-based studies: a news timestamp
+records when the vendor *published*, not when the information existed;
+coverage is itself caused by price moves, making the relationship circular;
+and an LLM reading historical headlines already knows what happened next,
+which is the look-ahead bias invalidating most published sentiment
+backtests. Large shocks are news events by definition, so returns identify
+them cleanly.
+
+**The result.** 10 coins, 90 days of 15-minute bars, 50,084 bars,
+**264 shocks** above 3.5 sigma:
+
+| Horizon | n | Mean forward return | Hit rate | t |
+|---|---|---|---|---|
+| 1 bar (15m) | 264 | +0.005% | 42.8% | 0.10 |
+| 2 bars (30m) | 264 | −0.043% | 47.3% | −0.53 |
+| 4 bars (1h) | 264 | +0.069% | 47.7% | 0.70 |
+| 8 bars (2h) | 263 | −0.043% | 47.5% | −0.34 |
+| 24 bars (6h) | 262 | −0.044% | 41.2% | −0.25 |
+
+**No drift at any horizon.** Every t-statistic sits between −0.53 and +0.70,
+nowhere near significance. Every mean is an order of magnitude below the
+0.10% round-trip cost. Hit rates are 41–48%, i.e. slightly *below* a coin
+flip: if anything shocks lean toward reversal, though not significantly.
+
+And **56% of the move is already done inside the shock bar itself**, before
+a slow participant could act at all.
+
+**Verdict: NOT TRADEABLE.** The swings are real. What follows them is not
+capturable. This is a well-powered result, not a thin one, and it closes the
+question rather than deferring it.
+
+**What it does not rule out.** This tests *unconditional* shocks. A specific
+category — scheduled events such as FOMC, CPI or ETF decisions — could behave
+differently, and that would be a *volatility positioning* strategy rather
+than a news-reaction bot: you know the date weeks ahead, so speed is not the
+edge. Worth a separate study if anyone wants it; it is a different strategy
+with a different test.
+
+---
+
 ## What I'd do next, in order
 
 1. **Measure which leg is the maker fill.** Decidable from data already

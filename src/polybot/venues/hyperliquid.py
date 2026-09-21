@@ -45,6 +45,25 @@ STATS_API = "https://stats-data.hyperliquid.xyz/Mainnet"
 # returns exactly that many is probably truncated.
 FILL_PAGE_LIMIT = 2_000
 
+INTERVAL_MINUTES: dict[str, int] = {
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+    "1h": 60, "2h": 120, "4h": 240, "8h": 480, "12h": 720,
+    "1d": 1440, "3d": 4320, "1w": 10080,
+}
+
+# Observed retention, measured 2026-09-21: candleSnapshot caps at ~5,000 bars
+# per request AND stops serving fine intervals beyond these depths. Older
+# requests return an empty list rather than an error, so a naive fetcher
+# reports far less data than asked for and says nothing.
+OBSERVED_RETENTION_DAYS: dict[str, float] = {
+    "1m": 4, "5m": 30, "15m": 90, "1h": 365, "4h": 365, "1d": 365,
+}
+
+
+def retention_days(interval: str) -> float:
+    """Roughly how far back this interval is served."""
+    return OBSERVED_RETENTION_DAYS.get(interval, 30.0)
+
 
 class HyperliquidAPI:
     """Read-only client for Hyperliquid's public info endpoint.
@@ -184,6 +203,91 @@ class HyperliquidAPI:
                 "truncated; re-run with a smaller window_hours.",
                 truncated, FILL_PAGE_LIMIT,
             )
+        return out
+
+    # ------------------------------------------------------------- candles
+
+    def candles(
+        self, coin: str, interval: str, start_ms: int, end_ms: int
+    ) -> list[dict[str, Any]]:
+        """OHLCV. Fields: t (ms), o, h, l, c, v."""
+        out = self._post({
+            "type": "candleSnapshot",
+            "req": {"coin": coin, "interval": interval,
+                    "startTime": start_ms, "endTime": end_ms},
+        })
+        return out if isinstance(out, list) else []
+
+    def candles_deep(
+        self,
+        coin: str,
+        interval: str = "1m",
+        *,
+        days_back: int = 30,
+        now_ms: int | None = None,
+        bars_per_request: int = 4_000,
+    ) -> list[dict[str, Any]]:
+        """Walk candles backwards, de-duplicated, oldest-first.
+
+        Two venue limits make the naive version silently return a fraction
+        of what you asked for, which is how a 30-day request quietly became
+        3.6 days of data and an underpowered study:
+
+        1. **~5,000 bars per request, whatever the interval.** Window size
+           must therefore be derived from the interval, not fixed in hours.
+        2. **Fine intervals are not retained for long.** 1m data stops at
+           roughly 4 days; anything older returns an empty list rather than
+           an error. `retention_days()` documents the observed limits.
+
+        Requesting history older than the interval retains simply yields
+        nothing, so callers get a short series and no warning. This logs
+        when the returned span falls well short of the request.
+        """
+        end = int(now_ms if now_ms is not None else time.time() * 1000)
+        floor = end - days_back * 86_400_000
+
+        minutes = INTERVAL_MINUTES.get(interval)
+        if minutes is None:
+            raise ValueError(f"unsupported interval {interval!r}")
+        step = bars_per_request * minutes * 60_000
+
+        by_ts: dict[int, dict[str, Any]] = {}
+        empty_windows = 0
+        while end > floor:
+            start = max(floor, end - step)
+            try:
+                batch = self.candles(coin, interval, start, end)
+            except Exception as exc:
+                log.warning("candles %s %d-%d failed: %s", coin, start, end, exc)
+                batch = []
+
+            if not batch:
+                empty_windows += 1
+                # Older windows are empty once retention runs out; keep
+                # going a little in case of a transient gap, then stop.
+                if empty_windows >= 2 and by_ts:
+                    log.info(
+                        "%s %s: history ends around %d days back (retention).",
+                        coin, interval, int((int(time.time() * 1000) - end) / 86_400_000),
+                    )
+                    break
+            else:
+                empty_windows = 0
+                for c in batch:
+                    t = int(c.get("t", 0))
+                    if t:
+                        by_ts[t] = c
+            end = start
+
+        out = [by_ts[t] for t in sorted(by_ts)]
+        if out:
+            span_days = (out[-1]["t"] - out[0]["t"]) / 86_400_000
+            if span_days < days_back * 0.5:
+                log.warning(
+                    "%s %s: asked for %d days, got %.1f. Fine intervals are "
+                    "not retained long -- use a coarser interval for more history.",
+                    coin, interval, days_back, span_days,
+                )
         return out
 
     # --------------------------------------------------------- leaderboard

@@ -111,6 +111,51 @@ def cmd_hl_profile(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_shock(args: argparse.Namespace, settings: Settings) -> int:
+    """Test whether news-driven moves are tradeable after they start."""
+    from .research.event_study import Candle, render_event_study, run_event_study
+    from .venues.hyperliquid import HyperliquidAPI
+
+    horizons = tuple(int(h) for h in args.horizons.split(",") if h.strip())
+
+    api = HyperliquidAPI()
+    pooled: list = []
+    try:
+        any_data = False
+        for coin in [c.strip().upper() for c in args.coins.split(",") if c.strip()]:
+            raw = api.candles_deep(coin, args.interval, days_back=args.days)
+            if not raw:
+                log.error("No candles for %s -- check access to api.hyperliquid.xyz", coin)
+                continue
+            any_data = True
+            candles = [Candle.from_hyperliquid(c) for c in raw]
+            study = run_event_study(
+                coin, candles, threshold_sigma=args.sigma, horizons=horizons
+            )
+            pooled.append(study)
+            print(render_event_study(study, round_trip_cost=args.cost))
+            print()
+    finally:
+        api.close()
+
+    if not any_data:
+        return 1
+
+    # Per-coin samples are usually too small for a verdict. Pooling across
+    # coins is the only way to reach a sample that supports one -- at the
+    # cost of assuming the effect is common across them.
+    if len(pooled) > 1:
+        from .research.event_study import pool_studies
+
+        combined = pool_studies(pooled)
+        print(render_event_study(combined, round_trip_cost=args.cost))
+        print()
+
+    print("Reminder: a drift that is statistically real but smaller than the")
+    print("round-trip cost is a statistically real way to lose money.")
+    return 0
+
+
 def cmd_markets(args: argparse.Namespace, settings: Settings) -> int:
     from .clients.gamma import GammaAPI
 
@@ -347,6 +392,22 @@ def build_parser() -> argparse.ArgumentParser:
     hlr.add_argument("--max-fills", type=int, default=40_000)
     hlr.add_argument("--out", default="out")
     hlr.set_defaults(func=cmd_hl_research)
+
+    sh = sub.add_parser(
+        "shock",
+        help="test whether news-driven price shocks drift or mean-revert",
+    )
+    sh.add_argument("--coins", default="BTC,ETH,SOL")
+    sh.add_argument("--days", type=int, default=30)
+    sh.add_argument("--interval", default="1m",
+                    help="1m retains ~4d, 5m ~30d, 15m ~90d, 1h ~365d")
+    sh.add_argument("--horizons", default="1,5,15,60,240",
+                    help="forward horizons in bars")
+    sh.add_argument("--sigma", type=float, default=4.0,
+                    help="how many sigma counts as a shock")
+    sh.add_argument("--cost", type=float, default=0.001,
+                    help="round-trip cost as a fraction (0.001 = 0.10%%)")
+    sh.set_defaults(func=cmd_shock)
 
     hlp = sub.add_parser("hl-profile", help="profile one Hyperliquid address")
     hlp.add_argument("wallet")

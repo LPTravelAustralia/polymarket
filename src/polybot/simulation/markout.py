@@ -95,8 +95,24 @@ def compute_markouts(
     fills: list[SimulatedFill],
     snapshots_by_token: dict[str, list[Snapshot]],
     horizons: tuple[int, ...] = DEFAULT_HORIZONS,
+    *,
+    relative: bool = False,
 ) -> dict[int, MarkoutResult]:
-    """Markout at each horizon, overall and split by fill reason."""
+    """Markout at each horizon, overall and split by fill reason.
+
+    `relative` expresses markout as a FRACTION OF PRICE rather than an
+    absolute amount, and is required whenever instruments have different
+    price scales.
+
+    On a prediction market every price is a probability in [0, 1], so
+    absolute markouts are directly comparable and pooling them is fine.
+    Across perps it is not: BTC near $84,000 moving 0.1% is $84 a unit
+    while DOGE near $0.09 moving 0.1% is $0.00009. Pooled in absolute
+    terms BTC swamps everything and the mean becomes meaningless -- the
+    first live run on Hyperliquid reported $23.66/share of adverse
+    selection against a median of $0.00009, which is the signature of
+    exactly this mistake.
+    """
     series = {tid: MidSeries(snaps) for tid, snaps in snapshots_by_token.items()}
     out: dict[int, MarkoutResult] = {}
 
@@ -116,6 +132,11 @@ def compute_markouts(
                 mo = future_mid - fill.price
             else:
                 mo = fill.price - future_mid
+
+            if relative:
+                if fill.price <= 0:
+                    continue
+                mo /= fill.price
 
             values.append(mo)
             by_reason.setdefault(fill.reason, []).append(mo)

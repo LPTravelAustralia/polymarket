@@ -265,7 +265,11 @@ class ReplayEngine:
             r.inventory_value += pos.shares * final_mid
             r.inventory_cost += pos.shares * pos.avg_price
 
-        r.markouts = compute_markouts(r.fills, by_token)
+        # Relative markout whenever thresholds are relative -- i.e. whenever
+        # instruments are priced in currency rather than probability.
+        r.markouts = compute_markouts(
+            r.fills, by_token, relative=self.params.relative_thresholds
+        )
         r.calibration = calibrate(
             r.markouts, current=self.params.adverse_selection_per_share
         )

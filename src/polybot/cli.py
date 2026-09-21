@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from .config import Mode, Settings
@@ -397,6 +398,8 @@ def _load_and_replay(args: argparse.Namespace, settings: Settings):
         return None
 
     perps = getattr(args, "perps", False)
+    probe = getattr(args, "probe", False)
+
     if perps:
         # Prediction-market params on a perp recording quote metres below the
         # market and measure nothing useful. See MakerParams.for_perps.
@@ -405,6 +408,26 @@ def _load_and_replay(args: argparse.Namespace, settings: Settings):
     else:
         params = settings.maker
         model = MicropriceModel()
+
+    if probe:
+        # A calibration run must NOT be gated by the parameter it is trying
+        # to measure. With production thresholds the strategy declines to
+        # quote, produces no fills, and calibration reports nothing -- which
+        # is circular: adverse selection is unknown, so we do not quote, so
+        # adverse selection stays unknown.
+        #
+        # Probe mode drops the edge requirements to zero and quotes at the
+        # touch, purely to generate fills whose markout can be measured. The
+        # resulting PnL is meaningless and must not be read as a backtest;
+        # only the markout is.
+        params = replace(
+            params,
+            min_edge_per_share=0.0,
+            adverse_selection_per_share=0.0,
+            base_half_spread=0.0 if params.relative_thresholds else 0.0,
+            uncertainty_multiplier=0.0,
+        )
+        log.info("Probe mode: quoting at the touch to generate fills for markout.")
 
     if not trades:
         log.warning(
@@ -586,6 +609,8 @@ def build_parser() -> argparse.ArgumentParser:
     cal = sub.add_parser("calibrate",
                          help="measure adverse selection from a recording")
     cal.add_argument("--data", required=True, help="a recording session directory")
+    cal.add_argument("--probe", action="store_true", default=True,
+                     help="quote at the touch to generate fills (default on)")
     cal.add_argument("--perps", action="store_true",
                     help="treat recording as perps (fractional thresholds)")
     cal.set_defaults(func=cmd_calibrate)

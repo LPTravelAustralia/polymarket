@@ -192,3 +192,48 @@ class TestMarkout:
         text = render_markout_report(m, calibrate(m, current=0.004, prefer_horizon=60))
         assert "Markout analysis" in text
         assert "adverse selection" in text.lower()
+
+
+class TestRelativeMarkout:
+    """Absolute markout is only poolable when instruments share a price
+    scale. Prediction-market prices are all probabilities in [0,1] so it is
+    fine there; across perps it is not, and pooling BTC with DOGE in
+    absolute terms produced a reported $23.66/share of adverse selection
+    against a $0.00009 median on the first live run.
+    """
+
+    @staticmethod
+    def _mixed_fills(n=60):
+        from polybot.simulation.fills import SimulatedFill
+
+        fills, snaps = [], {"BIG": [], "SMALL": []}
+        for i in range(n):
+            t = i * 1000.0
+            # Both lose exactly 1% after the fill, at wildly different scales.
+            for token, px in (("BIG", 80_000.0), ("SMALL", 0.08)):
+                fills.append(SimulatedFill(f"{token}{i}", token, "BUY", px, 1, t, "queue"))
+                lo, hi = px * 0.99, px * 1.01
+                snaps[token].append(snap(t, bids=[(px * 0.999, 10)],
+                                         asks=[(px * 1.001, 10)], token=token))
+                snaps[token].append(snap(t + 60, bids=[(lo * 0.999, 10)],
+                                         asks=[(lo * 1.001, 10)], token=token))
+        return fills, snaps
+
+    def test_absolute_mode_is_dominated_by_the_expensive_instrument(self):
+        fills, snaps = self._mixed_fills()
+        m = compute_markouts(fills, snaps, horizons=(60,), relative=False)
+        # ~1% of 80,000 swamps ~1% of 0.08 entirely.
+        assert m[60].mean < -100.0
+
+    def test_relative_mode_gives_the_shared_percentage(self):
+        fills, snaps = self._mixed_fills()
+        m = compute_markouts(fills, snaps, horizons=(60,), relative=True)
+        # Both instruments lost ~1%, so the pooled mean should be ~-0.01.
+        assert m[60].mean == pytest.approx(-0.01, abs=0.002)
+
+    def test_relative_mode_skips_non_positive_prices(self):
+        from polybot.simulation.fills import SimulatedFill
+
+        fills = [SimulatedFill("o", "t1", "BUY", 0.0, 1, 0.0, "queue")]
+        snaps = {"t1": [snap(0), snap(60)]}
+        assert compute_markouts(fills, snaps, horizons=(60,), relative=True) == {}

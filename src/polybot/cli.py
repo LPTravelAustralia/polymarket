@@ -238,6 +238,28 @@ def cmd_hl_quote(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_hl_record(args: argparse.Namespace, settings: Settings) -> int:
+    from .venues.hl_market import HyperliquidMarketData
+    from .venues.hl_recorder import HyperliquidRecorder
+
+    if args.coins:
+        coins = [c.strip().upper() for c in args.coins.split(",") if c.strip()]
+    else:
+        md = HyperliquidMarketData()
+        try:
+            coins = md.universe(limit=args.limit)
+        finally:
+            md.close()
+
+    if not coins:
+        log.error("No coins to record")
+        return 1
+
+    rec = HyperliquidRecorder(Path(args.out), coins)
+    rec.run(duration_seconds=args.duration)
+    return 0
+
+
 def cmd_markets(args: argparse.Namespace, settings: Settings) -> int:
     from .clients.gamma import GammaAPI
 
@@ -365,6 +387,7 @@ def cmd_record(args: argparse.Namespace, settings: Settings) -> int:
 
 def _load_and_replay(args: argparse.Namespace, settings: Settings):
     from .backtest.engine import ReplayEngine
+    from .config import MakerParams
     from .marketdata.store import load_session
     from .strategy.fair_value import MicropriceModel
 
@@ -373,7 +396,24 @@ def _load_and_replay(args: argparse.Namespace, settings: Settings):
         log.error("No snapshots found in %s -- run `polybot record` first.", args.data)
         return None
 
-    engine = ReplayEngine(MicropriceModel(), params=settings.maker)
+    perps = getattr(args, "perps", False)
+    if perps:
+        # Prediction-market params on a perp recording quote metres below the
+        # market and measure nothing useful. See MakerParams.for_perps.
+        params = MakerParams.for_perps()
+        model = MicropriceModel(min_uncertainty=0.0002, relative=True)
+    else:
+        params = settings.maker
+        model = MicropriceModel()
+
+    if not trades:
+        log.warning(
+            "No trade tape in this recording. Only price-through fills can be "
+            "simulated, and those are the ADVERSE subset -- any adverse "
+            "selection measured from this will be far too negative."
+        )
+
+    engine = ReplayEngine(model, params=params)
     return engine.run(snapshots, trades)
 
 
@@ -499,6 +539,14 @@ def build_parser() -> argparse.ArgumentParser:
     hq.add_argument("--max-size", type=float, default=100.0)
     hq.set_defaults(func=cmd_hl_quote)
 
+    hrec = sub.add_parser("hl-record",
+                          help="record Hyperliquid books + trades over websocket")
+    hrec.add_argument("--coins", default="", help="comma list; default = top universe")
+    hrec.add_argument("--limit", type=int, default=12)
+    hrec.add_argument("--duration", type=float, default=900.0, help="seconds")
+    hrec.add_argument("--out", default="data")
+    hrec.set_defaults(func=cmd_hl_record)
+
     hlp = sub.add_parser("hl-profile", help="profile one Hyperliquid address")
     hlp.add_argument("wallet")
     hlp.add_argument("--days", type=int, default=90)
@@ -531,11 +579,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     bt = sub.add_parser("backtest", help="replay the strategy over a recording")
     bt.add_argument("--data", required=True, help="a recording session directory")
+    bt.add_argument("--perps", action="store_true",
+                    help="treat recording as perps (fractional thresholds)")
     bt.set_defaults(func=cmd_backtest)
 
     cal = sub.add_parser("calibrate",
                          help="measure adverse selection from a recording")
     cal.add_argument("--data", required=True, help="a recording session directory")
+    cal.add_argument("--perps", action="store_true",
+                    help="treat recording as perps (fractional thresholds)")
     cal.set_defaults(func=cmd_calibrate)
 
     run = sub.add_parser("run", help="run the quoting loop")

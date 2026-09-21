@@ -103,14 +103,30 @@ is worse than useless: by the time a $1M position is visible on-chain, their
 own buying has already moved the price, so you buy the top of their move and
 carry their risk without their information.
 
-**swisstony's edge is exactly what a bot is for.** Tiny edge per trade, no
-opinion about any individual game, compounded across a hundred thousand fills,
-made viable by never paying a taker fee. That is the pattern this bot
-implements.
+**swisstony's edge is reproducible in principle — but not for the reason
+stated above.** Later research (see [TEARDOWN.md](TEARDOWN.md)) indicates the
+mechanism is **broadcast-lag arbitrage**: a real-time stadium data feed
+against a market still pricing off a 15–40 second delayed broadcast. That is
+an information and latency edge, not a modelling one, and it makes swisstony
+a **taker** — the opposite posture from this bot.
 
-Note the win rate: one profile puts swisstony at **53.6%** correct. That is
-the whole point. A small, persistent, correctly-priced edge applied at volume,
-not brilliance on any single market.
+That is reconcilable with "makers win, takers lose", and the reconciliation
+is the important idea: **taking is unprofitable unless you have information
+the market does not.** A round trip costs ~2.5¢/share; ordinary momentum
+trading does not clear that, but knowing a goal was scored 20 seconds early
+clears it many times over.
+
+Note the win rate: swisstony is reported at **53.6%**. A whale-cohort study
+put another top account's true rate at **53.3%**, after stripping out
+unclosed "zombie" positions that inflate the headline figures. Nobody is
+winning by being right often — they are being slightly right, very cheaply,
+very many times.
+
+**This bot implements the maker strategy, not the latency strategy.** That is
+a deliberate choice about barriers (no data contracts, no colocation, and it
+is the side Polymarket subsidises), not a claim to be doing what the largest
+account does. [TEARDOWN.md](TEARDOWN.md) lays out the trade-off and what
+Tier 1 would actually cost.
 
 ### 5. Classic latency arbitrage is dead
 

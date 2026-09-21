@@ -98,24 +98,58 @@ the matched portion. Some baskets are spectacular ($0.3558 on a Saudi league
 O/U, a 64c/share lock) and some are badly underwater ($1.77), so the spread
 is wide and the centre is fair value.
 
-### The reading that fits all of it
+### The leg-ordering test — and what it refuted
 
-100% BUY + 43% multi-outcome + a median basket of exactly $1.00 suggests
-**they exit by hedging, not by selling.** Take a directional position on a
-lag or a mispricing; when it moves, rather than selling (paying a second
-taker fee, into whatever liquidity exists) buy the *opposing* outcome to lock
-the result. The combined book converges on $1.00 per matched set because
-that is what a closed-out position looks like when you close it by buying the
-other side.
+I proposed that they exit by *hedging rather than selling*: take a
+directional position, and when it moves favourably, buy the opposing outcome
+to lock it in. That theory makes a specific prediction — **waiting longer
+before the second leg should produce better baskets**, because you are
+waiting for the move.
 
-This is consistent with, not contradictory to, the broadcast-lag reporting:
-lag supplies the entry edge, hedge-to-close supplies the exit.
+Ran it on 472 two-leg baskets, using the first fill on each leg as the entry.
+**The prediction fails, in the opposite direction:**
 
-**Confidence: moderate.** It fits every measured fact, but I have not
-verified the *ordering* — whether the second leg reliably follows the first
-after a favourable move. That test is: for each basket, compare leg
-timestamps against the market price path between them. Worth doing before
-building anything on it.
+| Group | n | median gap | median sum | share under $1 |
+|---|---|---|---|---|
+| Simultaneous (≤2s) | 4 | — | $0.9900 | 100% |
+| Sequential (>2s) | 468 | 1,093s | $0.9900 | 59.4% |
+| — fastest quartile | 117 | **141s** | $0.9900 | **72.6%** |
+| — slowest quartile | 117 | **5,738s** | $1.0000 | **53.0%** |
+
+Waiting longer makes baskets **worse**, not better. So hedge-after-a-move is
+refuted. So is simultaneous arbitrage — only 4 of 472 baskets complete inside
+two seconds.
+
+### What actually fits
+
+**Opportunistic complete-set accumulation, with a decaying edge.**
+
+Buy one leg when it is cheap. Then try to complete the set — buy the opposing
+outcome — before the opportunity evaporates. Complete it fast and you own a
+complete set for about **$0.99**, which pays $1.00 at resolution: roughly a
+**1¢/share lock**. Take too long and the price moves against you and you end
+up at fair value or worse.
+
+That is why speed matters here, and it is the most important number in this
+document: **completing within ~2 minutes succeeds 72.6% of the time; taking
+~95 minutes drops that to 53.0%** — barely better than a coin flip.
+
+One honest wrinkle. First-fill entry prices median **$0.9900**, but
+size-weighted across *all* fills the same baskets median **$1.0002**. Their
+opening fills are good and their follow-on fills are worse — they add to legs
+at deteriorating prices. So the 1¢ headline applies to the entry, not to the
+whole position, and the realised edge is thinner than $0.99 suggests.
+
+**Why this is the useful finding:** the relevant timescale is **minutes, not
+milliseconds**. That is within reach of a Python bot over REST. It is a
+completely different proposition from racing a colocated stadium feed.
+
+**What it needs to be real:** the 1¢/share lock is *gross*. Three quarters of
+these fills are taker fills, and at their mean entry of 0.521 the taker fee
+is roughly 0.75–1.25¢/share depending on category. **That can consume the
+entire edge.** Whether this is profitable therefore hinges on which leg is
+the maker fill and in which categories — which is the next thing to measure,
+and is measurable from this same data.
 
 ### What this changes for our bot
 

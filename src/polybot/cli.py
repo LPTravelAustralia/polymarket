@@ -66,6 +66,51 @@ def cmd_profile(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_hl_research(args: argparse.Namespace, settings: Settings) -> int:
+    import json
+
+    from .venues.hl_profiler import HyperliquidProfiler, render_hl_report
+
+    profiler = HyperliquidProfiler(days_back=args.days, max_fills=args.max_fills)
+    try:
+        profiles = profiler.profile_top(args.top)
+    finally:
+        profiler.close()
+
+    if not profiles:
+        log.error(
+            "No profiles produced. Check network access to api.hyperliquid.xyz, "
+            "or pass an address directly with `polybot hl-profile <address>`."
+        )
+        return 1
+
+    report = render_hl_report(profiles)
+    print(report)
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "hyperliquid_report.md").write_text(report, encoding="utf-8")
+    (out / "hyperliquid_profiles.json").write_text(
+        json.dumps([p.to_dict() for p in profiles], indent=2, default=str),
+        encoding="utf-8",
+    )
+    log.info("Wrote %s", out / "hyperliquid_report.md")
+    return 0
+
+
+def cmd_hl_profile(args: argparse.Namespace, settings: Settings) -> int:
+    from .venues.hl_profiler import HyperliquidProfiler, render_hl_profile
+
+    profiler = HyperliquidProfiler(days_back=args.days, max_fills=args.max_fills)
+    try:
+        profile = profiler.profile(args.wallet)
+    finally:
+        profiler.close()
+
+    print(render_hl_profile(profile))
+    return 0
+
+
 def cmd_markets(args: argparse.Namespace, settings: Settings) -> int:
     from .clients.gamma import GammaAPI
 
@@ -294,6 +339,20 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("wallet")
     pr.add_argument("--max-trades", type=int, default=20_000)
     pr.set_defaults(func=cmd_profile)
+
+    hlr = sub.add_parser("hl-research",
+                         help="profile top Hyperliquid accounts (perps)")
+    hlr.add_argument("--top", type=int, default=5)
+    hlr.add_argument("--days", type=int, default=90, help="history window")
+    hlr.add_argument("--max-fills", type=int, default=40_000)
+    hlr.add_argument("--out", default="out")
+    hlr.set_defaults(func=cmd_hl_research)
+
+    hlp = sub.add_parser("hl-profile", help="profile one Hyperliquid address")
+    hlp.add_argument("wallet")
+    hlp.add_argument("--days", type=int, default=90)
+    hlp.add_argument("--max-fills", type=int, default=40_000)
+    hlp.set_defaults(func=cmd_hl_profile)
 
     m = sub.add_parser("markets", help="list markets worth quoting")
     m.add_argument("--limit", type=int, default=30)

@@ -14,6 +14,21 @@ polybot markets --limit 20         # what the bot would quote
 polybot run --dry-run --cycles 5   # the quoting loop, sending nothing
 ```
 
+**The intended order of operations**, because the bot is not supposed to be
+switched on first:
+
+```bash
+polybot record --duration 86400 --odds      # 1. collect a day of books + odds
+polybot calibrate --data data/<session>     # 2. measure adverse selection
+polybot backtest --data data/<session>      # 3. replay the strategy over it
+polybot run --sports --dry-run              # 4. quote on a real model, no money
+```
+
+Step 2 replaces the single most dangerous default in the config with a
+measurement. Step 1 is time-critical in a way the others are not: Polymarket
+serves no deep book history and odds APIs sell no useful archive, so the
+dataset you will eventually need is the one you start recording today.
+
 ---
 
 ## What the research actually says
@@ -132,31 +147,62 @@ Built to reproduce the **systematic maker** archetype:
   past a threshold, because re-posting every cycle surrenders the queue
   priority that is most of the value of quoting passively.
 
-### The part you still have to supply
+### The edge: the sports model
 
-`MicropriceModel` is the default and it has **no informational edge**. It
-gives you spread capture and rebates; it does not give you swisstony's edge.
-It exists to verify the plumbing.
+`MicropriceModel` is the default and it has **no informational edge** — it
+gives you spread capture and rebates, not swisstony's edge. It exists to
+verify plumbing.
 
-To actually make money you need `ExternalModel` — a devigged sportsbook
-consensus, your own Elo, a pricing model for a category you understand:
+`SportsFairValue` is the real one: a devigged consensus of sportsbook odds,
+matched to Polymarket markets. `polybot run --sports` wires it up, or:
 
 ```python
-from polybot.strategy.fair_value import ExternalModel, devig_power, american_to_implied
+from polybot.models import SportsFairValue, TheOddsAPI
+from polybot.strategy.fair_value import ExternalModel
 
-def my_probability(token_id):
-    home, away = fetch_odds(token_id)        # your data source
-    fair = devig_power([american_to_implied(home), american_to_implied(away)])
-    return fair[0], 0.015                    # (probability, uncertainty)
-
-runner = BotRunner(settings, fair_value_model=ExternalModel(my_probability))
+sports = SportsFairValue(TheOddsAPI(), sport_keys=["basketball_nba"])
+sports.register(markets)
+runner = BotRunner(settings, fair_value_model=ExternalModel(sports.probability_fn))
 ```
 
-The bot cannot invent that model for you, and any framework implying
-otherwise is selling something. Two devig methods are included;
-`devig_power` is the one to use, because proportional devigging leaves
-longshots overpriced — and the tails are exactly where the fee curve makes
-trading cheapest.
+Three details it gets right that are commonly got wrong:
+
+- **Devig each book, then average** — not the reverse. Averaging raw implied
+  probabilities across books mixes together different margins and produces a
+  number that is no book's actual opinion.
+- **`devig_power`, not proportional.** Proportional devigging leaves longshots
+  overpriced, and the `p(1−p)` fee curve makes the tails the cheapest place to
+  trade — so that is exactly where you cannot afford the error.
+- **Sharp books weighted higher.** Pinnacle moves first and retail follows;
+  weighting them equally throws away the signal.
+
+Matching is the dangerous part, so it is paranoid: both outcomes must map to
+distinct teams, the match must beat the runner-up by a margin (a repeated
+fixture is refused rather than guessed), event time must be near market
+resolution, and anything below the confidence floor returns nothing. It also
+**stops quoting 15 minutes before tip-off**, because pre-game odds are
+worthless in-play and this has no live feed.
+
+### Proving it before trading it
+
+`polybot backtest` replays the *real* `MakerStrategy` — not a reimplementation
+— over recorded books. The fill model is the part that decides whether a
+backtest tells the truth, so it models **queue position** explicitly: you join
+the back of the queue at your price, and traded volume consumes that queue
+before it consumes you. The naive "price touched my bid so I filled" shortcut
+invents most of a market-making strategy's apparent profit, and invents it
+precisely in the cases where the price then moved your way.
+
+It also models **price-through** fills — the market running clean past your
+level — because that is the fill you did not want, and ignoring it flatters
+the strategy enormously.
+
+`polybot.backtest.scoring` answers the question that decides everything:
+does the model beat the market price on resolved markets? A Brier skill score
+at or below zero means no edge, and the tool says so in those words rather
+than finding something encouraging to report. It also refuses to call
+anything conclusive below 200 resolved markets, since prediction-market
+outcomes are correlated and the effective sample is smaller than the count.
 
 ---
 
@@ -210,6 +256,19 @@ src/polybot/
 │   ├── fair_value.py      Fair-value models and devigging
 │   ├── maker.py           The quoting strategy
 │   └── structural.py      Complement and neg-risk arbitrage detection
+├── models/
+│   ├── odds_feed.py       Sportsbook odds, devigged to a consensus
+│   ├── matching.py        Polymarket market <-> event matching (paranoid)
+│   └── sports.py          The sports fair-value model
+├── marketdata/
+│   ├── recorder.py        Collect books, trades and odds to disk
+│   └── store.py           Gzipped JSONL snapshot format
+├── simulation/
+│   ├── fills.py           Queue-aware fill model
+│   └── markout.py         Adverse-selection measurement + calibration
+├── backtest/
+│   ├── engine.py          Replay the live strategy over recordings
+│   └── scoring.py         Brier / log loss / calibration vs the market
 └── execution/
     ├── risk.py            Limits and kill switch
     └── order_manager.py   Order lifecycle and reconciliation
@@ -251,22 +310,33 @@ is information worth having for free.
 - **Category fee rates are a fallback only.** They have changed repeatedly.
   The bot fetches the authoritative per-token rate from the CLOB `/fee-rate`
   endpoint at runtime and only falls back to the hardcoded table on failure.
-- **`adverse_selection_per_share` is a placeholder, not a measurement.** The
-  default 0.4¢ is a guess. Measure it from your own fills (realised markout
-  after a fill) and update it. If it's wrong low, the bot will quote too
-  tightly and bleed.
+- **`adverse_selection_per_share` ships as a placeholder.** The default 0.4¢
+  is a guess. `polybot calibrate` replaces it with a measurement — run that
+  before trusting any PnL projection. If it is wrong low, the bot quotes too
+  tightly and bleeds slowly enough to look like variance for weeks.
 - **Rebates are not credited at decision time.** They're paid pro-rata from a
   pool days later, and treating them as certain income is how market makers
   talk themselves into negative-edge quotes. `expected_maker_rebate()` exists
   for accounting separately.
-- **No backtester yet.** The highest-value next addition: replay historical
-  books and measure whether the fair-value model actually beats the market
-  before risking money.
+- **The fill simulator ignores your own market impact.** It replays a book
+  recorded without your orders in it, so it cannot model other participants
+  reacting to your quotes. This matters more the larger you size.
+- **The trade tape from a REST recorder is incomplete.** A burst of trades
+  between polls is missed. That makes the simulator *more* pessimistic (the
+  queue drains slower than it really did), which is the safe direction, but
+  it is a real limitation. A websocket feed would fix it.
+- **The sports model is not backtested yet.** `polybot record --odds` now
+  captures odds alongside books so this becomes possible, but joining
+  recorded odds to recorded books and scoring against resolutions is not
+  built. Until then, `scoring.py` is the tool and you supply the
+  observations.
+- **Live/in-play markets are out of scope.** The sports model stops quoting
+  before kickoff by design.
 
 ## Tests
 
 ```bash
-python -m pytest        # 120 tests, no network required
+python -m pytest        # 191 tests, no network required
 ```
 
 The fee model is tested against Polymarket's published worked examples rather

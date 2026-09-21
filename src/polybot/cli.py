@@ -3,8 +3,14 @@
     polybot research --top 5              # profile the top wallets
     polybot profile 0xabc...              # profile one wallet
     polybot markets --limit 20            # what the bot would quote
-    polybot run --dry-run --cycles 5      # quoting loop, sends nothing
     polybot economics --price 0.5         # fee arithmetic for a trade
+
+    polybot record --duration 3600        # collect books/trades for backtests
+    polybot backtest --data out/rec/...   # replay the strategy over a recording
+    polybot calibrate --data out/rec/...  # measure adverse selection
+
+    polybot run --dry-run --cycles 5      # quoting loop, sends nothing
+    polybot run --sports                  # quote using the odds-based model
 """
 
 from __future__ import annotations
@@ -116,6 +122,132 @@ def cmd_economics(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _build_sports_model(markets, settings: Settings):
+    """Wire the odds-based fair value model, or return None with a reason."""
+    from .models.odds_feed import TheOddsAPI
+    from .models.sports import SportsFairValue
+    from .strategy.fair_value import ExternalModel
+
+    try:
+        provider = TheOddsAPI()
+    except RuntimeError as exc:
+        log.error("%s", exc)
+        return None
+
+    sports = SportsFairValue(provider)
+    bound = sports.register(markets)
+    print(sports.coverage_report())
+    if bound == 0:
+        log.error(
+            "No markets could be bound to sportsbook events. The bot would "
+            "quote nothing; refusing to start."
+        )
+        return None
+    return ExternalModel(sports.probability_fn)
+
+
+def cmd_record(args: argparse.Namespace, settings: Settings) -> int:
+    from .clients.clob import ClobGateway
+    from .clients.gamma import GammaAPI
+    from .marketdata.recorder import MarketRecorder
+
+    with GammaAPI() as gamma:
+        markets = gamma.tradeable_markets(
+            min_liquidity=args.min_liquidity, min_volume_24h=args.min_volume
+        )
+    markets.sort(key=lambda m: m.volume_24h, reverse=True)
+    markets = markets[: args.markets]
+
+    if not markets:
+        log.error("No markets matched the filters")
+        return 1
+
+    token_ids = [t for m in markets for t in m.token_ids]
+    condition_ids = [m.condition_id for m in markets if m.condition_id]
+    log.info("Recording %d markets (%d tokens)", len(markets), len(token_ids))
+
+    odds_provider = None
+    sport_keys: list[str] = []
+    if args.odds:
+        from .models.odds_feed import TheOddsAPI
+        from .models.sports import SPORT_KEYS
+
+        try:
+            odds_provider = TheOddsAPI()
+            sport_keys = list(SPORT_KEYS.values())
+        except RuntimeError as exc:
+            log.warning("Odds recording disabled: %s", exc)
+
+    gateway = ClobGateway(settings)
+    recorder = MarketRecorder(
+        gateway,
+        Path(args.out),
+        interval=args.interval,
+        odds_provider=odds_provider,
+        sport_keys=sport_keys,
+    )
+    recorder.install_signal_handlers()
+    recorder.run(token_ids, condition_ids, duration_seconds=args.duration)
+    return 0
+
+
+def _load_and_replay(args: argparse.Namespace, settings: Settings):
+    from .backtest.engine import ReplayEngine
+    from .marketdata.store import load_session
+    from .strategy.fair_value import MicropriceModel
+
+    snapshots, trades = load_session(Path(args.data))
+    if not snapshots:
+        log.error("No snapshots found in %s -- run `polybot record` first.", args.data)
+        return None
+
+    engine = ReplayEngine(MicropriceModel(), params=settings.maker)
+    return engine.run(snapshots, trades)
+
+
+def cmd_backtest(args: argparse.Namespace, settings: Settings) -> int:
+    from .simulation.markout import render_markout_report
+
+    result = _load_and_replay(args, settings)
+    if result is None:
+        return 1
+
+    print(result.summary())
+    print()
+    if result.calibration:
+        print(render_markout_report(result.markouts, result.calibration))
+
+    print()
+    print(
+        "NOTE: this replays the microprice baseline, which has no informational\n"
+        "edge by construction. A near-zero or negative PnL here is the expected\n"
+        "result, and it still gives you the real number that matters: the\n"
+        "adverse selection above. Plug a genuine model in to test for edge."
+    )
+    return 0
+
+
+def cmd_calibrate(args: argparse.Namespace, settings: Settings) -> int:
+    from .simulation.markout import render_markout_report
+
+    result = _load_and_replay(args, settings)
+    if result is None:
+        return 1
+    if not result.fills:
+        log.error(
+            "No simulated fills in this recording, so adverse selection cannot "
+            "be measured. Record for longer, or across more active markets."
+        )
+        return 1
+
+    print(render_markout_report(result.markouts, result.calibration))
+    print()
+    cal = result.calibration
+    if cal and cal.confident:
+        print(f"Set in .env:  POLYBOT_ADVERSE_SELECTION={cal.suggested:.4f}")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     from .runner import BotRunner
 
@@ -135,6 +267,13 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     runner = BotRunner(settings)
     runner.install_signal_handlers()
     markets = runner.select_markets(limit=args.markets)
+
+    if args.sports:
+        model = _build_sports_model(markets, settings)
+        if model is None:
+            return 1
+        runner.model = model
+
     runner.run(markets, interval=args.interval, max_cycles=args.cycles)
     return 0
 
@@ -168,12 +307,35 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--category", default="sports")
     e.set_defaults(func=cmd_economics)
 
+    rec = sub.add_parser("record", help="record books and trades for backtesting")
+    rec.add_argument("--markets", type=int, default=20)
+    rec.add_argument("--interval", type=float, default=2.0)
+    rec.add_argument("--duration", type=float, default=None,
+                     help="seconds to record (default: until interrupted)")
+    rec.add_argument("--out", default="data", help="output directory")
+    rec.add_argument("--min-liquidity", type=float, default=5_000.0)
+    rec.add_argument("--min-volume", type=float, default=10_000.0)
+    rec.add_argument("--odds", action="store_true",
+                     help="also record sportsbook odds (needs POLYBOT_ODDS_API_KEY)")
+    rec.set_defaults(func=cmd_record)
+
+    bt = sub.add_parser("backtest", help="replay the strategy over a recording")
+    bt.add_argument("--data", required=True, help="a recording session directory")
+    bt.set_defaults(func=cmd_backtest)
+
+    cal = sub.add_parser("calibrate",
+                         help="measure adverse selection from a recording")
+    cal.add_argument("--data", required=True, help="a recording session directory")
+    cal.set_defaults(func=cmd_calibrate)
+
     run = sub.add_parser("run", help="run the quoting loop")
     run.add_argument("--dry-run", action="store_true", help="force dry-run mode")
     run.add_argument("--markets", type=int, default=15)
     run.add_argument("--interval", type=float, default=5.0)
     run.add_argument("--cycles", type=int, default=None, help="stop after N cycles")
     run.add_argument("--yes", action="store_true", help="skip the live confirmation")
+    run.add_argument("--sports", action="store_true",
+                     help="use the odds-based fair value model instead of microprice")
     run.set_defaults(func=cmd_run)
 
     return p

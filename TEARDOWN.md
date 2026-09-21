@@ -49,6 +49,85 @@ in the second group.
 
 ---
 
+## MEASURED: swisstony, pulled from the chain
+
+The rest of this document was written from published reporting. **This
+section is different — it is measured.** Pulled 2026-09-21 via
+`polybot profile`, 40,000 fills over 4 days plus a 10,000-fill detailed
+sample.
+
+| Metric | Value |
+|---|---|
+| Fills | 40,000 in **4 days**, across 4,426 markets |
+| Volume | $5.88M over those 4 days |
+| Posture | **75.6% taker / 24.4% maker** |
+| Rate | ~373 fills/hour; **28.6% of consecutive fills land in the same second**; median gap 2s |
+| Size | median **$12**, mean $147, max $48,572 |
+| Side mix | **100% BUY. Zero sells in 10,000 consecutive fills.** |
+| Mean entry price | 0.521 — the exact point where the fee curve peaks |
+| Concentration | HHI 0.004 — extraordinarily diversified |
+| Markets | Obscure ones: ITF women's tennis, Korean league O/U, Saudi league, exact-score markets |
+
+### What is established
+
+1. **It is a machine, and a fast one.** 373 fills/hour with 28.6% of fills
+   sharing a timestamp second is not a person, and not a slow model either.
+2. **It is predominantly a taker.** 75.6% aggressive. That refutes the
+   "systematic maker" reading this repo originally shipped, and it means the
+   account is paying the taker fee on three quarters of its entries —
+   at a mean entry price of 0.521, i.e. the most expensive point on the fee
+   curve. It is doing that *deliberately*, which means the edge per trade
+   must comfortably exceed the fee.
+3. **It never sells.** Zero SELL fills in 10,000. Positions are not exited;
+   they are held to resolution.
+4. **It frequently owns more than one outcome of the same market** — 43.2% of
+   markets traded. Example: bought both Lea Boskovic ($131.92) *and* Tahlia
+   Kokkinis ($372.58) in the same tennis match.
+
+### What is NOT established
+
+I tested whether the multi-outcome buying is complete-set arbitrage — buying
+all outcomes for under $1 and collecting the difference at resolution. **The
+data does not support that cleanly:**
+
+- 472 multi-outcome baskets, of which 48.9% sum to under $1.00
+- **Median basket sums to $1.0002**, mean $1.0296
+
+A median of essentially exactly $1.00 is not arbitrage. It is break-even on
+the matched portion. Some baskets are spectacular ($0.3558 on a Saudi league
+O/U, a 64c/share lock) and some are badly underwater ($1.77), so the spread
+is wide and the centre is fair value.
+
+### The reading that fits all of it
+
+100% BUY + 43% multi-outcome + a median basket of exactly $1.00 suggests
+**they exit by hedging, not by selling.** Take a directional position on a
+lag or a mispricing; when it moves, rather than selling (paying a second
+taker fee, into whatever liquidity exists) buy the *opposing* outcome to lock
+the result. The combined book converges on $1.00 per matched set because
+that is what a closed-out position looks like when you close it by buying the
+other side.
+
+This is consistent with, not contradictory to, the broadcast-lag reporting:
+lag supplies the entry edge, hedge-to-close supplies the exit.
+
+**Confidence: moderate.** It fits every measured fact, but I have not
+verified the *ordering* — whether the second leg reliably follows the first
+after a favourable move. That test is: for each basket, compare leg
+timestamps against the market price path between them. Worth doing before
+building anything on it.
+
+### What this changes for our bot
+
+- The **maker-only** design does not reproduce this account. Stated plainly.
+- The **"never sell, hedge to close"** exit is reproducible *today*, needs no
+  data feed, and is probably the single most valuable transferable idea here.
+  It avoids a second taker fee and sidesteps thin exit liquidity.
+- The entry edge still requires either a latency advantage or a better model.
+  That part is not free.
+
+---
+
 ## The accounts
 
 Sources disagree on figures, sometimes wildly — swisstony's lifetime profit is

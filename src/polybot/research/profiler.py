@@ -52,10 +52,16 @@ class TraderProfiler:
         gamma: GammaAPI | None = None,
         *,
         max_trades: int = 20_000,
+        deep_history: bool = True,
+        days_back: int = 180,
     ):
         self.data = data or DataAPI()
         self.gamma = gamma or GammaAPI()
         self.max_trades = max_trades
+        # Offset paging stops at ~10,000 records, which on a high-frequency
+        # wallet is under a day. Time-windowed fetching reaches real history.
+        self.deep_history = deep_history
+        self.days_back = days_back
         self._category_cache: dict[str, str] = {}
 
     def close(self) -> None:
@@ -92,24 +98,42 @@ class TraderProfiler:
         warnings: list[str] = []
 
         log.info("Pulling trade history for %s", wallet)
-        trades = list(self.data.trades(user=wallet, taker_only=False, max_items=self.max_trades))
+        if self.deep_history:
+            trades = self.data.trades_deep(
+                wallet, days_back=self.days_back, max_items=self.max_trades
+            )
+        else:
+            trades = list(
+                self.data.trades(user=wallet, taker_only=False, max_items=self.max_trades)
+            )
         if len(trades) >= self.max_trades:
             warnings.append(
                 f"History truncated at {self.max_trades:,} fills -- statistics cover "
                 "only the most recent slice, so lifetime figures will understate."
             )
 
-        # Maker/taker split by differencing. This is the key measurement and
-        # the API gives us no direct field for it.
+        # Maker/taker posture. Measured over a time-aligned window rather than
+        # by differencing raw counts: the two queries return equal row counts
+        # covering different spans, so a naive difference reports the
+        # windowing gap as maker fills and collapses to 0% whenever both
+        # queries hit the API's offset ceiling.
         taker_count: int | None = None
         try:
-            takers = list(
-                self.data.trades(user=wallet, taker_only=True, max_items=self.max_trades)
-            )
-            taker_count = len(takers)
+            measured = self.data.measure_maker_ratio(wallet)
+            if measured is not None:
+                maker_n, taker_n, ratio = measured
+                # Express the measured ratio over the analysed sample.
+                taker_count = int(round((1.0 - ratio) * len(trades)))
+                warnings.append(
+                    f"Maker/taker measured over an aligned sample of "
+                    f"{maker_n + taker_n:,} fills ({ratio:.1%} maker), then "
+                    "applied to the full sample."
+                )
+            else:
+                warnings.append("Maker/taker split could not be measured.")
         except Exception as exc:
             warnings.append(f"Could not determine maker/taker split: {exc}")
-            log.warning("takerOnly query failed for %s: %s", wallet, exc)
+            log.warning("maker ratio measurement failed for %s: %s", wallet, exc)
 
         activity: list[dict[str, Any]] = []
         try:

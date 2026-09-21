@@ -119,6 +119,131 @@ class DataAPI:
         }
         return self._c.paginate_offset("/activity", params, max_items=max_items)
 
+    def trades_deep(
+        self,
+        user: str,
+        *,
+        days_back: int = 180,
+        window_hours: int = 12,
+        max_items: int | None = None,
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Walk history backwards in time, past the offset ceiling.
+
+        `/trades` refuses offsets beyond ~10,000, which on a high-frequency
+        wallet is a single day. `/activity` accepts `start`/`end` timestamps,
+        so stepping a window backwards reaches arbitrarily deep history.
+
+        Window size is a trade-off: too wide and a busy wallet's window
+        exceeds the per-request cap and silently truncates; too narrow and you
+        make thousands of requests. 12 hours suits a wallet doing a few
+        hundred fills an hour.
+        """
+        import time as _time
+
+        end = int(now if now is not None else _time.time())
+        floor = end - days_back * 86_400
+        step = window_hours * 3_600
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        truncated_windows = 0
+
+        while end > floor:
+            start = max(floor, end - step)
+            rows = list(
+                self._c.paginate_offset(
+                    "/activity",
+                    {"user": user, "type": "TRADE", "start": start, "end": end},
+                    max_items=10_000,
+                )
+            )
+            # A full window may mean the window itself was capped, so record
+            # it rather than pretending the history is complete.
+            if len(rows) >= 10_000:
+                truncated_windows += 1
+
+            for row in rows:
+                key = (
+                    f"{row.get('transactionHash')}|{row.get('asset')}|"
+                    f"{row.get('size')}|{row.get('price')}"
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(row)
+
+            if max_items is not None and len(out) >= max_items:
+                return out[:max_items]
+            end = start
+
+        if truncated_windows:
+            log.warning(
+                "%d window(s) hit the record cap; history for those periods is "
+                "incomplete. Re-run with a smaller window_hours.", truncated_windows
+            )
+        return out
+
+    def measure_maker_ratio(
+        self, user: str, *, pages: int = 8
+    ) -> tuple[int, int, float] | None:
+        """Measure maker vs taker fills over a time-aligned window.
+
+        The Data API exposes no maker/taker field, so this differences a
+        `takerOnly=true` query against `takerOnly=false`. The subtlety that
+        makes a naive version wrong: the two queries return the same *number*
+        of rows but cover **different time spans**, because one is a filtered
+        subset. Differencing them directly reports the windowing gap as maker
+        fills, and if both queries hit the offset ceiling it reports 0% maker
+        for everyone.
+
+        So we clip both to the interval each fully covers before comparing.
+
+        Returns (maker_fills, taker_fills, maker_ratio) or None.
+        """
+        def fetch(taker_only: str) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for offset in range(0, pages * 500, 500):
+                try:
+                    page = self._c.get(
+                        "/trades",
+                        {"user": user, "takerOnly": taker_only,
+                         "limit": 500, "offset": offset},
+                    )
+                except Exception:
+                    break
+                batch = page if isinstance(page, list) else page.get("data", [])
+                if not batch:
+                    break
+                rows.extend(batch)
+            return rows
+
+        def key(r: dict[str, Any]) -> str:
+            return (
+                f"{r.get('transactionHash')}|{r.get('asset')}|"
+                f"{r.get('size')}|{r.get('price')}"
+            )
+
+        takers = fetch("true")
+        allf = fetch("false")
+        if not takers or not allf:
+            return None
+
+        t_ts = [_as_float(r.get("timestamp")) for r in takers]
+        a_ts = [_as_float(r.get("timestamp")) for r in allf]
+        lo, hi = max(min(t_ts), min(a_ts)), min(max(t_ts), max(a_ts))
+        if hi <= lo:
+            return None
+
+        in_window = lambda r: lo <= _as_float(r.get("timestamp")) <= hi  # noqa: E731
+        taker_keys = {key(r) for r in takers if in_window(r)}
+        all_keys = {key(r) for r in allf if in_window(r)}
+        if not all_keys:
+            return None
+
+        maker = len(all_keys - taker_keys)
+        taker = len(all_keys) - maker
+        return maker, taker, maker / len(all_keys)
+
     def value(self, user: str, market: str | None = None) -> dict[str, Any]:
         """Current portfolio value for a wallet."""
         return self._c.get("/value", {"user": user, "market": market})
@@ -144,9 +269,13 @@ class DataAPI:
         Returns [] if none respond -- callers should fall back to
         discover_wallets_from_markets().
         """
+        # /v2/leaderboard is the live one as of this writing. Note that its
+        # `window` parameter is accepted but ignored -- every value returns the
+        # same rows -- so these are the current top performers, NOT the
+        # all-time list. Treat the ordering accordingly.
         attempts = [
-            ("/leaderboard", {"window": window, "orderBy": order_by, "limit": limit}),
             ("/v2/leaderboard", {"window": window, "orderBy": order_by, "limit": limit}),
+            ("/leaderboard", {"window": window, "orderBy": order_by, "limit": limit}),
             ("/leaderboard", {"period": window, "sortBy": order_by, "limit": limit}),
         ]
         for path, params in attempts:
@@ -179,10 +308,13 @@ class DataAPI:
         for row in raw:
             if not isinstance(row, dict):
                 continue
+            # /v2/leaderboard uses user_id/user_name; older shapes use
+            # proxyWallet/name. Accept both rather than silently returning [].
             wallet = (
                 row.get("proxyWallet")
                 or row.get("wallet")
                 or row.get("address")
+                or row.get("user_id")
                 or row.get("user")
             )
             if not wallet:
@@ -190,9 +322,15 @@ class DataAPI:
             out.append(
                 {
                     "wallet": wallet,
-                    "name": row.get("name") or row.get("pseudonym") or row.get("username"),
+                    "name": (
+                        row.get("name")
+                        or row.get("user_name")
+                        or row.get("pseudonym")
+                        or row.get("username")
+                    ),
                     "pnl": _as_float(row.get("pnl") or row.get("profit") or row.get("cashPnl")),
                     "volume": _as_float(row.get("volume") or row.get("vol")),
+                    "rank": row.get("rank"),
                     "raw": row,
                 }
             )

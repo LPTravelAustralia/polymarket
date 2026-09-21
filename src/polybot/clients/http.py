@@ -18,6 +18,18 @@ log = logging.getLogger(__name__)
 
 RETRY_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
+# The Data API refuses offsets past ~10,000 with a 400. That is a hard wall,
+# not an error to retry: deep history simply is not reachable by paging.
+OFFSET_CEILING = 10_000
+
+
+class ClientRequestError(RuntimeError):
+    """A 4xx that will not succeed on retry."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class RateLimiter:
     """Simple thread-safe token bucket."""
@@ -89,8 +101,17 @@ class JsonClient:
                         request=resp.request,
                         response=resp,
                     )
+                # A non-retryable 4xx means the request itself is wrong.
+                # Retrying it five times just delays the same failure and
+                # burns rate limit, so fail fast and let the caller decide.
+                if 400 <= resp.status_code < 500:
+                    raise ClientRequestError(
+                        f"{resp.status_code} from {url}", resp.status_code
+                    )
                 resp.raise_for_status()
                 return resp.json()
+            except ClientRequestError:
+                raise
             except (httpx.HTTPError, ValueError) as exc:
                 last_exc = exc
                 if attempt == self.max_retries - 1:
@@ -129,7 +150,27 @@ class JsonClient:
         offset = 0
         yielded = 0
         while True:
-            page = self.get(path, {**(params or {}), "limit": limit, "offset": offset})
+            if offset >= OFFSET_CEILING:
+                log.warning(
+                    "%s: stopping at offset %d (API ceiling). Deeper history is "
+                    "not reachable by paging -- results cover the most recent "
+                    "%d records only.",
+                    path, offset, yielded,
+                )
+                return
+
+            try:
+                page = self.get(path, {**(params or {}), "limit": limit, "offset": offset})
+            except ClientRequestError as exc:
+                # Walking off the end of a paginated endpoint is a normal stop
+                # condition, not a failure. Returning what we have beats
+                # discarding thousands of already-fetched rows.
+                log.warning(
+                    "%s: pagination stopped at offset %d (%s). Returning %d records.",
+                    path, offset, exc, yielded,
+                )
+                return
+
             rows = page.get(page_key, []) if isinstance(page, dict) and page_key else page
             if isinstance(rows, dict):
                 rows = rows.get("data", [])

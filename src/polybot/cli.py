@@ -261,6 +261,29 @@ def cmd_hl_record(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+
+def cmd_sweep(args: argparse.Namespace, settings: Settings) -> int:
+    """Measure adverse selection across quote depths."""
+    from .marketdata.store import load_session
+    from .simulation.depth_sweep import render_sweep, sweep_depths
+
+    snapshots, trades = load_session(Path(args.data))
+    if not snapshots:
+        log.error("No snapshots in %s", args.data)
+        return 1
+    if not trades:
+        log.error(
+            "No trade tape in this recording. Only price-through fills could "
+            "be simulated and the result would be meaningless."
+        )
+        return 1
+
+    depths = tuple(float(d) for d in args.depths.split(",") if d.strip())
+    sweep = sweep_depths(snapshots, trades, depths, fee_bps=args.fee_bps)
+    print(render_sweep(sweep))
+    return 0
+
+
 def cmd_markets(args: argparse.Namespace, settings: Settings) -> int:
     from .clients.gamma import GammaAPI
 
@@ -575,6 +598,15 @@ def build_parser() -> argparse.ArgumentParser:
     hlp.add_argument("--days", type=int, default=90)
     hlp.add_argument("--max-fills", type=int, default=40_000)
     hlp.set_defaults(func=cmd_hl_profile)
+
+    sw = sub.add_parser("sweep",
+                        help="adverse selection vs quote depth")
+    sw.add_argument("--data", required=True)
+    sw.add_argument("--depths", default="0,2,5,10,20,40",
+                    help="distances from fair value, in bps")
+    sw.add_argument("--fee-bps", type=float, default=1.5,
+                    help="round-trip maker fee for comparison")
+    sw.set_defaults(func=cmd_sweep)
 
     m = sub.add_parser("markets", help="list markets worth quoting")
     m.add_argument("--limit", type=int, default=30)

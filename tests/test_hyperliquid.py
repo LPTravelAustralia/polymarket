@@ -150,3 +150,42 @@ class TestLeaderboardParsing:
 
     def test_malformed_row(self):
         assert _window_performance({}, "month") == {}
+
+
+class TestClassifierWindowNormalisation:
+    """Thresholds were calibrated on Polymarket wallets with years of
+    history. A short but dense sample must not be dropped to UNCLASSIFIED
+    purely for having fewer than 2,000 lifetime fills.
+    """
+
+    @staticmethod
+    def _dense(n, maker, days=10):
+        step = int(days * 86_400_000 / n)
+        return [
+            fill(coin=f"C{i%40}", t=1_700_000_000_000 + i * step,
+                 sz="1", px="50", crossed=not maker)
+            for i in range(n)
+        ]
+
+    def test_short_dense_maker_sample_still_classifies(self):
+        fills = self._dense(1_951, maker=True)
+        s = summarise_fills(fills)
+        fp = build_fingerprint("0xbecca", to_common_fills(fills),
+                               taker_fill_count=s.taker_fills)
+        assert fp.total_trades == 1_951
+        assert classify(fp).label == "SYSTEMATIC_MAKER"
+
+    def test_short_dense_taker_sample_still_classifies(self):
+        fills = self._dense(600, maker=False, days=3)
+        s = summarise_fills(fills)
+        fp = build_fingerprint("0xtaker", to_common_fills(fills),
+                               taker_fill_count=s.taker_fills)
+        assert classify(fp).label == "MOMENTUM_TAKER"
+
+    def test_genuinely_sparse_history_stays_unclassified(self):
+        """The relaxation must not make everything classifiable."""
+        fills = self._dense(40, maker=True, days=60)
+        s = summarise_fills(fills)
+        fp = build_fingerprint("0xsparse", to_common_fills(fills),
+                               taker_fill_count=s.taker_fills)
+        assert classify(fp).label == "UNCLASSIFIED"

@@ -447,7 +447,15 @@ def classify(fp: Fingerprint) -> Archetype:
         )
 
     # Systematic maker: many small fills, mostly resting, short holds.
-    if trades >= 2_000 and avg <= 2_000 and maker_ratio >= 0.6:
+    #
+    # Thresholds are expressed per active day as well as in absolute terms,
+    # because the absolute ones were calibrated on Polymarket wallets with
+    # years of history. A 10-day sample of a Hyperliquid account doing 200
+    # fills a day is obviously systematic and was being dropped to
+    # UNCLASSIFIED purely because 1,951 < 2,000.
+    per_day = fp.trades_per_active_day
+    systematic = trades >= 2_000 or (trades >= 300 and per_day >= 100)
+    if systematic and avg <= 20_000 and maker_ratio >= 0.6:
         reasons.append(f"{trades:,} fills averaging ${avg:,.0f}")
         reasons.append(f"{maker_ratio:.0%} of fills are passive (maker)")
         if fp.median_hold_seconds is not None:
@@ -471,7 +479,7 @@ def classify(fp: Fingerprint) -> Archetype:
         )
 
     # High-turnover taker: the pattern that loses money at scale.
-    if trades >= 500 and maker_ratio < 0.35:
+    if (trades >= 500 or (trades >= 100 and per_day >= 50)) and maker_ratio < 0.35:
         reasons.append(f"{trades:,} fills, only {maker_ratio:.0%} passive")
         reasons.append(
             "Crosses the spread habitually -- pays the taker fee on every entry"

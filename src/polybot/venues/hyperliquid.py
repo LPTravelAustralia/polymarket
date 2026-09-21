@@ -292,13 +292,39 @@ class HyperliquidAPI:
 
     # --------------------------------------------------------- leaderboard
 
-    def leaderboard(self, limit: int = 25, *, order_by: str = "pnl",
-                    window: str = "month") -> list[dict[str, Any]]:
-        """Top accounts.
+    def leaderboard(
+        self,
+        limit: int = 25,
+        *,
+        order_by: str = "pnl",
+        window: str = "month",
+        min_volume: float = 1_000_000.0,
+        min_turnover: float = 0.0,
+        min_pnl: float = 0.0,
+        min_account_value: float = 0.0,
+    ) -> list[dict[str, Any]]:
+        """Top accounts, filtered to ones that actually trade.
 
-        The leaderboard lives on a separate stats host and is not part of the
-        documented /info surface, so it is treated as best-effort: on failure
-        callers should fall back to supplying addresses directly.
+        **The default filters are not cosmetic.** Ranking this leaderboard by
+        raw PnL is actively misleading: of ~46,600 rows, **59% have zero
+        trading volume**, and the very top of the PnL table is dominated by
+        them -- one shows $285M profit on $0 volume, which at 1.81% ROI
+        implies a ~$15.7bn balance. Those are vaults, bridges and
+        institutional holdings, not traders. Profiling them tells you nothing
+        about how to trade, and several cluster suspiciously around 24-25%
+        ROI, consistent with a shared vault product rather than skill.
+
+        `min_turnover` (volume / account value) is the sharper filter.
+        It separates *getting rich by holding* from *running a machine*:
+        observed values span 0.03x to 80x, and only the high end reflects a
+        mechanical strategy worth reverse-engineering.
+
+        **But turnover alone selects for churners.** Sorting by it without
+        `min_pnl` returns accounts at -74% ROI with 27% win rates and
+        drained balances -- machines, but ones destroying themselves on
+        fees. High turnover is necessary for a copyable strategy and
+        nowhere near sufficient. `min_account_value` additionally excludes
+        accounts that have already blown up or withdrawn.
 
         `window` is one of day / week / month / allTime.
         """
@@ -322,19 +348,34 @@ class HyperliquidAPI:
             if not addr:
                 continue
             perf = _window_performance(row, window)
+            volume = _f(perf.get("vlm"))
+            account_value = _f(row.get("accountValue"))
+            turnover = volume / account_value if account_value > 0 else 0.0
+
+            pnl = _f(perf.get("pnl"))
+            if (
+                volume < min_volume
+                or turnover < min_turnover
+                or pnl < min_pnl
+                or account_value < min_account_value
+            ):
+                continue
+
             out.append(
                 {
                     "wallet": addr,
                     "name": row.get("displayName") or None,
-                    "pnl": _f(perf.get("pnl")),
-                    "volume": _f(perf.get("vlm")),
+                    "pnl": pnl,
+                    "volume": volume,
                     "roi": _f(perf.get("roi")),
-                    "account_value": _f(row.get("accountValue")),
+                    "account_value": account_value,
+                    "turnover": turnover,
                     "raw": row,
                 }
             )
 
-        key = {"pnl": "pnl", "volume": "volume", "roi": "roi"}.get(order_by, "pnl")
+        key = {"pnl": "pnl", "volume": "volume", "roi": "roi",
+               "turnover": "turnover"}.get(order_by, "pnl")
         out.sort(key=lambda r: r.get(key) or 0.0, reverse=True)
         return out[:limit]
 

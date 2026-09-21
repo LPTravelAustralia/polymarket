@@ -138,12 +138,70 @@ that makes the port cheap.
 
 ---
 
+## MEASURED: what the Hyperliquid data actually said
+
+Run 2026-09-21 against live data. Three findings, in order of importance.
+
+### 1. The maker-side design is validated by a real profitable account
+
+`0xbeccae9f...` — $284k monthly PnL, 34.8% ROI on a ~$1M account:
+
+| | |
+|---|---|
+| Posture | **71.7% maker** (1,399 passive / 552 aggressive) |
+| Fills | 1,951 across 39 markets, median hold **19 minutes** |
+| Median size | $403 |
+| **Fee drag** | **0.0013% of notional** |
+| Win rate on closed trades | **35.0%** |
+
+**A 35% win rate, and profitable.** That is the systematic-maker archetype
+working exactly as the theory says it should: be wrong most of the time,
+cheaply, and let the spread and the fee structure do the work.
+
+Compare the fee drag against Polymarket's measured **0.92% of capital
+deployed**. That is a **~700x** difference, and it is the entire argument for
+the move in one number.
+
+### 2. On the same venue, the high-turnover takers do worse
+
+| Account | Posture | Win rate | Net over sample |
+|---|---|---|---|
+| `0xbeccae9f` | **71.7% maker** | 35.0% | **positive** |
+| `0xe60dcdf2` | 0% maker | 42.4% | +$27.7k |
+| `0x24fb6523` | 4.4% maker | **69.6%** | **−$36.1k** |
+
+`0x24fb6523` is the lesson in one row: **a 69.6% win rate and a net loss.**
+Fee drag 0.027% versus the maker's 0.0013% — twenty times worse on the same
+venue — and losses larger than wins. Win rate is not the metric; expectancy
+after costs is.
+
+The maker/taker result replicates here on exact data, without the
+differencing hack Polymarket forced.
+
+### 3. The leaderboard is a trap, twice over
+
+**59% of its ~46,600 rows have zero trading volume.** The top of the PnL
+table is dominated by them — one shows **$285M profit on $0 volume**, which
+at 1.81% ROI implies a ~$15.7bn balance. Vaults, bridges and institutional
+holdings, not traders. Several cluster at 24–25% ROI, consistent with a
+shared vault product rather than skill. A naive "profile the top 5" profiles
+those and learns nothing.
+
+**And filtering for turnover alone selects churners.** Sorting by turnover
+without requiring profit returns accounts at −74% ROI, 27% win rates and
+drained balances. They are machines — machines destroying themselves on
+fees. High turnover is necessary for a copyable strategy and nowhere near
+sufficient.
+
+Usable filter: volume > $50M, turnover > 4x, PnL > 0, account value > 0.
+That reduces ~46,600 rows to a handful genuinely worth reading.
+
+---
+
 ## What I'd do
 
-1. **Point `research/fingerprint.py` at Hyperliquid's leaderboard.** Small
-   adapter. It answers the original question — *what do the top accounts
-   actually do* — on a venue where the answer is also *actionable*, because
-   fees and capital velocity don't disqualify the answer before you start.
+1. ~~**Point `research/fingerprint.py` at Hyperliquid's leaderboard.**~~
+   **Done** — see above. The answer validates the maker design.
 2. **Re-run the same nine gates** from `STRATEGY.md` on whatever that
    profiling surfaces. The framework doesn't change; only the inputs do.
 3. **Do not port the trading bot yet.** Porting it is a week of work and

@@ -142,6 +142,28 @@ class TestCrossSectional:
                                      rebalance_hours=100, lookback_hours=100)
         assert r.window_hours <= 500
 
+    def test_measured_leg_cost_replaces_the_uniform_one(self):
+        """A thin name must cost what it costs, not what BTC costs."""
+        rich = series([FLAT_10PCT * 5] * 3000, coin="RICH")
+        poor = series([0.0] * 3000, coin="POOR")
+        u = {"RICH": rich, "POOR": poor}
+        base = simulate_cross_sectional(u, top_n=1, rebalance_hours=240,
+                                        lookback_hours=240)
+        dear = simulate_cross_sectional(u, top_n=1, rebalance_hours=240,
+                                        lookback_hours=240,
+                                        leg_cost_by_coin={"RICH": 0.05})
+        # One entry and one unwind, each at the measured 5%.
+        assert dear.cost == pytest.approx(0.10)
+        assert dear.net < base.net
+
+    def test_unmeasured_coins_fall_back_to_the_uniform_cost(self):
+        rich = series([FLAT_10PCT * 5] * 3000, coin="RICH")
+        poor = series([0.0] * 3000, coin="POOR")
+        r = simulate_cross_sectional({"RICH": rich, "POOR": poor}, top_n=1,
+                                     rebalance_hours=240, lookback_hours=240,
+                                     leg_cost_by_coin={"POOR": 0.5})
+        assert r.cost == pytest.approx(2 * r.costs.one_leg)
+
     def test_empty_universe_is_handled(self):
         r = simulate_cross_sectional({"A": series([0.0] * 10)}, top_n=1,
                                      rebalance_hours=100, lookback_hours=100)

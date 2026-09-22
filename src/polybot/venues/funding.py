@@ -471,6 +471,7 @@ def simulate_cross_sectional(
     rebalance_hours: int = 24 * 30,
     lookback_hours: int = 24 * 30,
     costs: HarvestCosts | None = None,
+    leg_cost_by_coin: dict[str, float] | None = None,
 ) -> CrossSectionalResult:
     """Rank on trailing funding, hold the top N, rebalance on a fixed clock.
 
@@ -478,8 +479,18 @@ def simulate_cross_sectional(
     paid before the holding period, never during it. Execution is charged per
     leg that actually changes hands: names carried across a rebalance pay
     nothing, which is the whole advantage of this shape over a timing rule.
+
+    `leg_cost_by_coin` replaces the uniform `costs.one_leg` with a measured
+    cost per name (fees plus that name's own slippage). Without it, a thin
+    memecoin perp and BTC are assumed equally cheap to trade, which is the
+    assumption that flattered the first version of this result.
     """
     costs = costs or HarvestCosts()
+
+    def leg(c: str) -> float:
+        if leg_cost_by_coin is not None and c in leg_cost_by_coin:
+            return leg_cost_by_coin[c]
+        return costs.one_leg
 
     # Align on the timestamps every coin has, so a name with a short history
     # cannot silently drop out of the ranking mid-window.
@@ -515,9 +526,11 @@ def simulate_cross_sectional(
         target = set(ranked[:top_n])
 
         # Only the difference trades.
-        churn = len(target - held) + len(held - target)
+        changed = (target - held) | (held - target)
+        churn = len(changed)
+        churn_cost = sum(leg(c) for c in changed) / top_n
         result.turnover_legs += churn
-        result.cost += churn * costs.one_leg / top_n
+        result.cost += churn_cost
 
         hold = axis[i: i + rebalance_hours]
         entry, exit_ = hold[0], hold[-1]
@@ -529,14 +542,14 @@ def simulate_cross_sectional(
             result.gross += g / top_n
             result.basis += b / top_n
 
-        result.period_returns.append(period - churn * costs.one_leg / top_n)
+        result.period_returns.append(period - churn_cost)
         result.periods += 1
         held = target
         i += rebalance_hours
 
     # Unwind whatever is still on at the end.
     result.turnover_legs += len(held)
-    result.cost += len(held) * costs.one_leg / top_n
+    result.cost += sum(leg(c) for c in held) / top_n
     result.window_hours = result.periods * rebalance_hours
     return result
 

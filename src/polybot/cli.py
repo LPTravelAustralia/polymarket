@@ -121,6 +121,60 @@ def cmd_repeat(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_hedge_cost(args: argparse.Namespace, settings: Settings) -> int:
+    """Measure hedge execution from live books, then price the carry on it."""
+    import json
+    import urllib.request
+
+    from .venues.funding import fetch_funding_history
+    from .venues.hedge_cost import (
+        USER_AGENT,
+        breakeven_spot_fee,
+        carry_on_measured_costs,
+        render_survey,
+        survey,
+    )
+    from .venues.hyperliquid import HyperliquidAPI
+
+    coins = [c.strip() for c in args.coins.split(",") if c.strip()]
+    sizes = tuple(float(x) for x in args.sizes.split(",") if x.strip())
+
+    req = urllib.request.Request("https://api.exchange.coinbase.com/products",
+                                 headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        products = {p["id"] for p in json.load(r)
+                    if p.get("status") == "online" and not p.get("trading_disabled")}
+
+    s = survey(coins, products, sizes=sizes, snapshots=args.snapshots,
+               interval=args.interval)
+    print(render_survey(s))
+
+    series = {}
+    with HyperliquidAPI() as api:
+        for c in coins:
+            ser = fetch_funding_history(api, c, days=args.days, pause=0.4)
+            if len(ser) >= 24 * 60:
+                series[c] = ser
+
+    print(f"\nTop-{args.top} carry, monthly rebalance, on measured costs "
+          f"(spot fee {args.spot_fee:.2%}, hurdle {args.hurdle:.2%})")
+    print("=" * 78)
+    for size in sizes:
+        r, universe = carry_on_measured_costs(series, s, size,
+                                              spot_fee=args.spot_fee,
+                                              top_n=args.top)
+        capital = size * args.top * r.costs.capital_multiplier
+        be = breakeven_spot_fee(series, s, size, hurdle=args.hurdle,
+                                top_n=args.top)
+        excess = r.net_apr_on_capital - args.hurdle
+        print(f"  ${size:>9,.0f} per name (~${capital:,.0f} capital): "
+              f"{len(universe)} names fillable, net {r.net_apr_on_capital:+.2%}, "
+              f"vs hurdle {excess:+.2%} (${excess * capital:+,.0f}/yr), "
+              "break-even spot fee "
+              + (f"{be:.3%}" if be is not None else "none"))
+    return 0
+
+
 def cmd_funding(args: argparse.Namespace, settings: Settings) -> int:
     """Measure whether perp carry survives the cost of carrying it."""
     from .venues.funding import (
@@ -671,6 +725,22 @@ def build_parser() -> argparse.ArgumentParser:
                     help="all-in round-trip execution cost")
     rp.add_argument("--trades", type=int, default=100)
     rp.set_defaults(func=cmd_repeat)
+
+    hc = sub.add_parser("hedge-cost",
+                        help="measure carry hedge execution from live books")
+    hc.add_argument("--coins",
+                    default="BTC,ETH,SOL,XRP,HYPE,DOGE,LINK,ZEC,FARTCOIN,kPEPE")
+    hc.add_argument("--sizes", default="10000,50000,250000",
+                    help="notional per name, per leg")
+    hc.add_argument("--snapshots", type=int, default=5)
+    hc.add_argument("--interval", type=float, default=60.0,
+                    help="seconds between book snapshots")
+    hc.add_argument("--days", type=int, default=365)
+    hc.add_argument("--spot-fee", type=float, default=0.0010)
+    hc.add_argument("--hurdle", type=float, default=0.0408,
+                    help="APR to beat; default is the 3m T-bill, 18 Sep 2026")
+    hc.add_argument("--top", type=int, default=5)
+    hc.set_defaults(func=cmd_hedge_cost)
 
     fd = sub.add_parser("funding",
                         help="does perp carry survive its execution cost?")

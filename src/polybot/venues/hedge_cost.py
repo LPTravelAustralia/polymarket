@@ -226,6 +226,73 @@ def survey(
     return out
 
 
+def carry_on_measured_costs(
+    series_by_coin: dict,
+    s: HedgeCostSurvey,
+    size: float,
+    *,
+    spot_fee: float,
+    perp_fee: float = 0.00045,
+    top_n: int = 5,
+    rebalance_hours: int = 24 * 30,
+    lookback_hours: int = 24 * 30,
+    capital_multiplier: float = 1.25,
+):
+    """Cross-sectional carry where every name pays its own measured cost.
+
+    Names that cannot fill `size` on either leg are removed from the universe
+    before ranking -- a name you cannot put on is not a candidate, however
+    much it pays.
+    """
+    from .funding import HarvestCosts, simulate_cross_sectional
+
+    legs, universe = {}, {}
+    for c, ser in series_by_coin.items():
+        slip = s.one_leg_slippage(c, size)
+        if slip is None:
+            continue
+        legs[c] = perp_fee + spot_fee + slip
+        universe[c] = ser
+    costs = HarvestCosts(perp_taker=perp_fee, spot_taker=spot_fee,
+                         perp_slippage=0.0, spot_slippage=0.0,
+                         capital_multiplier=capital_multiplier)
+    result = simulate_cross_sectional(
+        universe, top_n=top_n, rebalance_hours=rebalance_hours,
+        lookback_hours=lookback_hours, costs=costs, leg_cost_by_coin=legs,
+    )
+    return result, sorted(universe)
+
+
+def breakeven_spot_fee(
+    series_by_coin: dict, s: HedgeCostSurvey, size: float, *,
+    hurdle: float, **kw,
+) -> float | None:
+    """The spot taker fee at which the carry exactly matches `hurdle` APR.
+
+    Reported instead of a verdict at one assumed fee, because the fee is the
+    one input that depends on who you are -- region and volume tier -- and
+    could not be verified from here. Returns None when the carry misses the
+    hurdle even at a zero spot fee: no tier rescues it at that size.
+    """
+    def apr(fee: float) -> float:
+        r, _ = carry_on_measured_costs(series_by_coin, s, size,
+                                       spot_fee=fee, **kw)
+        return r.net_apr_on_capital
+
+    lo, hi = 0.0, 0.02
+    if apr(lo) < hurdle:
+        return None
+    if apr(hi) >= hurdle:
+        return hi
+    for _ in range(40):
+        mid = (lo + hi) / 2.0
+        if apr(mid) >= hurdle:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
 def render_survey(s: HedgeCostSurvey) -> str:
     lines = [
         "Measured hedge execution: Coinbase spot buy + Hyperliquid perp sell",

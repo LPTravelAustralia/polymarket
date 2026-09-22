@@ -7,7 +7,14 @@ a book too thin to fill is reported as unfillable rather than as cheap.
 
 import pytest
 
-from polybot.venues.hedge_cost import HedgeCostSurvey, LegCost, walk_book
+from polybot.venues.funding import HOURS_PER_YEAR, FundingPoint, FundingSeries
+from polybot.venues.hedge_cost import (
+    HedgeCostSurvey,
+    LegCost,
+    breakeven_spot_fee,
+    carry_on_measured_costs,
+    walk_book,
+)
 
 ASKS = [(100.5, 10.0), (101.0, 10.0), (102.0, 10.0)]   # $1005 + $1010 + $1020
 BIDS = [(99.5, 10.0), (99.0, 10.0), (98.0, 10.0)]
@@ -75,3 +82,52 @@ class TestSurvey:
     def test_unknown_coin(self):
         s = self._survey([1.0], [1.0])
         assert s.one_leg_slippage("NOPE", 10_000.0) is None
+
+
+def _series(coin, apr, hours=3000):
+    rate = apr / HOURS_PER_YEAR
+    return FundingSeries(coin=coin, points=[
+        FundingPoint(ts_ms=i * 3_600_000, rate=rate, premium=0.0)
+        for i in range(hours)])
+
+
+def _measured(costs_bps: dict[str, float | None], size=10_000.0):
+    s = HedgeCostSurvey(sizes=(size,))
+    for c, bps in costs_bps.items():
+        if bps is None:
+            s.spot[(c, size)] = LegCost(c, "coinbase", size, exhausted=1)
+            s.perp[(c, size)] = LegCost(c, "hyperliquid", size, samples=[1.0])
+        else:
+            s.spot[(c, size)] = LegCost(c, "coinbase", size, samples=[bps])
+            s.perp[(c, size)] = LegCost(c, "hyperliquid", size, samples=[0.0])
+    return s
+
+
+class TestMeasuredCarry:
+    def test_unfillable_names_leave_the_universe(self):
+        """A name you cannot put on is not a candidate, however much it
+        pays -- otherwise the ranking picks it and the result is fiction."""
+        ser = {"RICH": _series("RICH", 0.50), "OK": _series("OK", 0.10)}
+        sv = _measured({"RICH": None, "OK": 5.0})
+        r, universe = carry_on_measured_costs(ser, sv, 10_000.0, spot_fee=0.0,
+                                              top_n=1, rebalance_hours=240,
+                                              lookback_hours=240)
+        assert universe == ["OK"]
+        assert r.gross / (r.window_hours / HOURS_PER_YEAR) == pytest.approx(
+            0.10, rel=1e-3)
+
+    def test_breakeven_fee_hits_the_hurdle(self):
+        ser = {"A": _series("A", 0.10)}
+        sv = _measured({"A": 5.0})
+        kw = dict(top_n=1, rebalance_hours=240, lookback_hours=240)
+        fee = breakeven_spot_fee(ser, sv, 10_000.0, hurdle=0.05, **kw)
+        assert fee is not None and 0.0 < fee < 0.02
+        r, _ = carry_on_measured_costs(ser, sv, 10_000.0, spot_fee=fee, **kw)
+        assert r.net_apr_on_capital == pytest.approx(0.05, abs=1e-6)
+
+    def test_no_breakeven_when_even_free_execution_misses(self):
+        ser = {"A": _series("A", 0.02)}
+        sv = _measured({"A": 5.0})
+        assert breakeven_spot_fee(ser, sv, 10_000.0, hurdle=0.05, top_n=1,
+                                  rebalance_hours=240,
+                                  lookback_hours=240) is None

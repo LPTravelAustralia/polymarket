@@ -31,6 +31,37 @@ dataset you will eventually need is the one you start recording today.
 
 ---
 
+## Where the findings are
+
+The bot was the starting point, not the conclusion. Twelve strategies were
+put through the same measurement pipeline across four venues, and the
+results are worth more than the code:
+
+| Document | What it establishes |
+|---|---|
+| [STRATEGY.md](STRATEGY.md) | The nine gates every candidate is tested against |
+| [TEARDOWN.md](TEARDOWN.md) | The top Polymarket accounts, tagged MEASURED / REPORTED / INFERRED |
+| [VENUE.md](VENUE.md) | Polymarket vs Hyperliquid: where fees stop being the binding constraint |
+| [FUNDING.md](FUNDING.md) | Perp carry — the one candidate that works, and pays the T-bill rate |
+| [MEMECOINS.md](MEMECOINS.md) | pump.fun, Axiom, copy trading, and why repetition amplifies a negative edge |
+
+**The short version.** Eleven of twelve candidates failed, and they failed
+for one reason rather than twelve: fees and adverse selection exceed the
+available edge everywhere a retail participant can reach. Polymarket's 0.92%
+round trip consumed a 1.01% structural edge. Hyperliquid solved the fee
+problem — 0.0013% measured — and ran straight into 3.8bp of adverse
+selection against a 2bp spread. The twelfth, funding harvest, clears its
+costs and earns roughly what cash earns.
+
+The winners at every venue were structurally advantaged rather than skilled:
+a 20-second broadcast lag, a mint address known before it existed, a 1% fee
+on everybody else. None of those is a strategy you can adopt.
+
+Treat this repo as due diligence tooling. Its demonstrated value is killing
+bad ideas cheaply — including, twice, its own.
+
+---
+
 ## What the research actually says
 
 ### 1. Winning on Polymarket is extremely concentrated

@@ -112,6 +112,68 @@ def cmd_hl_profile(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_repeat(args: argparse.Namespace, settings: Settings) -> int:
+    """What repeating a trade does to a bankroll."""
+    from .research.repetition import LogNormalReturns, render_repetition
+
+    dist = LogNormalReturns.from_mean_and_median(args.mean, args.median)
+    print(render_repetition(dist, cost=args.cost, trades=args.trades))
+    return 0
+
+
+def cmd_funding(args: argparse.Namespace, settings: Settings) -> int:
+    """Measure whether perp carry survives the cost of carrying it."""
+    from .venues.funding import (
+        HarvestCosts,
+        fetch_funding_history,
+        render_harvest,
+        simulate_always_on,
+        simulate_harvest,
+    )
+    from .venues.hyperliquid import HyperliquidAPI
+
+    costs = HarvestCosts(
+        perp_taker=args.perp_fee,
+        spot_taker=args.spot_fee,
+        perp_slippage=args.slippage,
+        spot_slippage=args.slippage,
+        capital_multiplier=args.capital_multiplier,
+    )
+
+    with HyperliquidAPI() as api:
+        coins = [c.strip().upper() for c in args.coins.split(",") if c.strip()]
+        if not coins:
+            log.error("No coins given")
+            return 1
+
+        print(f"Funding harvest, {args.days}d of hourly prints")
+        print("=" * 78)
+        print(f"  perp {costs.perp_taker:.3%} + spot {costs.spot_taker:.3%} "
+              f"+ {args.slippage:.3%} slippage a leg "
+              f"-> {costs.round_trip:.3%} round trip")
+        print(f"  capital multiplier {costs.capital_multiplier:.2f}x notional\n")
+
+        for coin in coins:
+            series = fetch_funding_history(api, coin, days=args.days)
+            if not series.points:
+                print(f"  {coin}: no funding history\n")
+                continue
+            print(render_harvest(simulate_always_on(series, costs=costs),
+                                 label="[always on]"))
+            print(render_harvest(
+                simulate_harvest(
+                    series,
+                    costs=costs,
+                    entry_apr=args.entry_apr,
+                    exit_apr=args.exit_apr,
+                    lookback_hours=args.lookback,
+                ),
+                label=f"[timed: in >{args.entry_apr:.0%}, out <{args.exit_apr:.0%}]",
+            ))
+            print()
+    return 0
+
+
 def cmd_shock(args: argparse.Namespace, settings: Settings) -> int:
     """Test whether news-driven moves are tradeable after they start."""
     from .research.event_study import Candle, render_event_study, run_event_study
@@ -598,6 +660,35 @@ def build_parser() -> argparse.ArgumentParser:
     hlp.add_argument("--days", type=int, default=90)
     hlp.add_argument("--max-fills", type=int, default=40_000)
     hlp.set_defaults(func=cmd_hl_profile)
+
+    rp = sub.add_parser("repeat",
+                        help="what repeating a trade does to a bankroll")
+    rp.add_argument("--mean", type=float, default=5.522,
+                    help="mean per-trade return (5.522 = +552%%)")
+    rp.add_argument("--median", type=float, default=-0.040,
+                    help="median per-trade return")
+    rp.add_argument("--cost", type=float, default=0.042,
+                    help="all-in round-trip execution cost")
+    rp.add_argument("--trades", type=int, default=100)
+    rp.set_defaults(func=cmd_repeat)
+
+    fd = sub.add_parser("funding",
+                        help="does perp carry survive its execution cost?")
+    fd.add_argument("--coins", default="BTC,ETH,SOL",
+                    help="comma-separated perp symbols")
+    fd.add_argument("--days", type=int, default=365)
+    fd.add_argument("--perp-fee", type=float, default=0.00045)
+    fd.add_argument("--spot-fee", type=float, default=0.00100,
+                    help="taker fee at the venue holding the spot hedge")
+    fd.add_argument("--slippage", type=float, default=0.0002,
+                    help="assumed slippage per leg")
+    fd.add_argument("--capital-multiplier", type=float, default=1.25,
+                    help="capital committed per unit of notional")
+    fd.add_argument("--entry-apr", type=float, default=0.10)
+    fd.add_argument("--exit-apr", type=float, default=0.02)
+    fd.add_argument("--lookback", type=int, default=24,
+                    help="trailing hours the entry rule may look at")
+    fd.set_defaults(func=cmd_funding)
 
     sw = sub.add_parser("sweep",
                         help="adverse selection vs quote depth")

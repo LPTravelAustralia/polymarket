@@ -123,6 +123,103 @@ user and the best for the house.
 
 ---
 
+## 3b. "Lots of small trades, sell before the drop"
+
+The most natural objection to everything above: *any single trade is a coin
+flip, but if I take a small gain and get out before it falls over, and repeat
+that constantly, surely the odds compound in my favour?* That instinct is
+correct **given a positive edge**. Tested against this distribution it is
+exactly backwards, and the reason is specific rather than moral.
+
+Reproduce with `polybot repeat`.
+
+### The premise is inverted
+
+The strategy is being proposed as an alternative to how the losing 94% trade.
+It is what they already do. **Median Solana memecoin hold time is 58
+seconds.** The 770-call study's best case — buy at the exact instant, sell 30
+seconds later — *is* this strategy, tested with zero latency, and its median
+is **−4.0%**. The 94% loss rate is the loss rate of people already scalping.
+
+### Bankrolls multiply, so the median is what compounds
+
+Sequential bets on the same pot multiply rather than add, so what accumulates
+is the mean of the *logarithm* of each trade. For this distribution the mean
+is +552% and the geometric mean is the median, −4.0%. Those have opposite
+signs, and the negative one is the one that compounds.
+
+Fitting a lognormal to the published pair and rolling the bankroll forward
+100 times at 4.2% round-trip cost:
+
+| | |
+|---|---|
+| Median terminal bankroll | **0.024% of what you started with** |
+| Wiped out (under 1% left) | 57.5% |
+| **Mean terminal bankroll** | **×3.16 × 10³⁰** |
+
+The mean is enormous and essentially nobody experiences it. It is one path in
+ten thousand carrying the average for all of them. Repetition does not
+average a negative median into a positive mean; it converts the mean into a
+statistic about somebody else.
+
+### The model overreaches, and that is the finding
+
+At *fractional* stake the same model says a 25% position compounds to 10¹²
+over 100 trades with a 0% chance of losing money. That is false, and the tool
+flags it: four independent datasets put the real loss rate at 94–96%, the
+model predicts 67%, and `sanity_check` returns **FAILS**.
+
+The reconstruction breaks in an informative way. A **+552% sample mean from
+770 observations** of a distribution this skewed is not an estimate of the
+population mean — it is a statement about the largest one or two observations
+in that sample, and it moves when you add data. Any compounding model fed
+that number prints the wealth of whoever held those particular tokens.
+
+Which raises the only question that matters: **to earn that mean, you must
+hold the outliers.**
+
+### The take-profit is the trade
+
+Apply the actual proposal — take profit at +20%, stop out at −10%, on every
+trade:
+
+| Exit rule | Mean return | Median | Win rate | Mean given up to the cap |
+|---|---|---|---|---|
+| **TP +20% / SL −10%** | **+0.08%** | **−8.02%** | 48.3% | **−537.9 points** |
+| TP +50% / SL −20% | +7.93% | −8.02% | 48.3% | −530.1 points |
+| TP +200% / SL −50% | +44.26% | −8.02% | 48.3% | −493.8 points |
+| No rule at all | +538.01% | −8.02% | 48.3% | — |
+
+At the 6.2% cost of a contested launch, the +20%/−10% row is **−2.01%**.
+
+**The cap is where the mean lived.** A take-profit is, precisely and only, a
+rule for discarding the right tail — and in this market the right tail is one
+hundred percent of the expected value. Selling before the drop also sells
+before the 40×. What is left is a **48.3% win rate on a −8% median**, paying a
+fee on every flip.
+
+Note what the exit rules do *not* change: the median and the win rate are
+identical across every row. Caps bite in the tails; the typical trade is
+untouched. So the scalper inherits the median as their lived experience and
+gives up the mean as the price.
+
+Three things make the real version worse than this table:
+
+1. **The stop-loss is modelled optimistically** — it assumes you exit at
+   exactly −10%. Against a bonding curve, with the same 400ms that broke copy
+   trading, you do not.
+2. **Costs are charged once per round trip.** Turning over 20 times a day at
+   4.2% is ~84% a day in execution.
+3. **It assumes you can enter at the call instant**, which no one can.
+
+**Conclusion: repetition is an amplifier, not a filter.** It magnifies
+whatever per-trade edge exists. Where the edge is negative, trading more
+often is the fastest available way to realise it — and every exit rule that
+makes the strategy feel safer removes more of the only thing that made the
+average positive.
+
+---
+
 ## 4. Who actually wins, and it is documented
 
 **Infrastructure.** Not traders.
@@ -309,6 +406,9 @@ Four venues, one structure:
    binding constraint at every single venue tested, without exception.
 5. **The marketing is the right tail of a negative-median distribution.**
    +552% mean, −4% median.
+6. **Every proposed fix trades away expectation for comfort.** Selling before
+   the drop removes the tail that held the entire mean; trading more often
+   multiplies a negative edge rather than averaging it away.
 
 ---
 

@@ -11,6 +11,8 @@
 
     polybot run --dry-run --cycles 5      # quoting loop, sends nothing
     polybot run --sports                  # quote using the odds-based model
+
+    polybot regime                        # is the market paying for risk now?
 """
 
 from __future__ import annotations
@@ -118,6 +120,37 @@ def cmd_repeat(args: argparse.Namespace, settings: Settings) -> int:
 
     dist = LogNormalReturns.from_mean_and_median(args.mean, args.median)
     print(render_repetition(dist, cost=args.cost, trades=args.trades))
+    return 0
+
+
+def cmd_regime(args: argparse.Namespace, settings: Settings) -> int:
+    """Is the market paying for carrying risk right now?"""
+    import os
+
+    from .monitor.regime import render_markdown, take_reading
+
+    reading = take_reading()
+    report = render_markdown(reading)
+    print(report)
+
+    if args.summary:
+        with open(args.summary, "a", encoding="utf-8") as f:
+            f.write(report + "\n")
+
+    if reading.level is None:
+        log.error("No data source could be read; no regime reported.")
+        return 1
+
+    if args.github_issue:
+        from .monitor.alerts import GitHubIssues, apply
+
+        if not (os.environ.get("GITHUB_TOKEN")
+                and os.environ.get("GITHUB_REPOSITORY")):
+            log.error("--github-issue needs GITHUB_TOKEN and GITHUB_REPOSITORY")
+            return 1
+        action = apply(reading, GitHubIssues.from_env(),
+                       webhook=os.environ.get("REGIME_WEBHOOK_URL") or None)
+        print(f"\nalert action: {action.value}")
     return 0
 
 
@@ -725,6 +758,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="all-in round-trip execution cost")
     rp.add_argument("--trades", type=int, default=100)
     rp.set_defaults(func=cmd_repeat)
+
+    rg = sub.add_parser("regime",
+                        help="is the market paying for carrying risk right now?")
+    rg.add_argument("--github-issue", action="store_true",
+                    help="open/update/close the alert issue (for CI)")
+    rg.add_argument("--summary", default=None,
+                    help="append the report to this file "
+                         "(e.g. $GITHUB_STEP_SUMMARY)")
+    rg.set_defaults(func=cmd_regime)
 
     hc = sub.add_parser("hedge-cost",
                         help="measure carry hedge execution from live books")

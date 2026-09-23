@@ -1,0 +1,48 @@
+# Checks every six hours whether the market is paying for carrying risk,
+# and keeps one GitHub issue in step with the answer. See REGIME.md.
+#
+# Settings (repository Settings > Secrets and variables > Actions):
+#   variable REGIME_HURDLE       your cash rate, e.g. 4.5 for 4.5% (default 4.08)
+#   variable REGIME_SUSDE_WARM / _RICH, REGIME_HLP_WARM / _RICH,
+#            REGIME_FUNDING_WARM / _RICH   threshold overrides, same format
+#   secret   REGIME_WEBHOOK_URL  optional Slack or Discord webhook
+name: Regime monitor
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: regime-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e .
+      - name: Take a reading
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGIME_WEBHOOK_URL: ${{ secrets.REGIME_WEBHOOK_URL }}
+          REGIME_HURDLE: ${{ vars.REGIME_HURDLE }}
+          REGIME_SUSDE_WARM: ${{ vars.REGIME_SUSDE_WARM }}
+          REGIME_SUSDE_RICH: ${{ vars.REGIME_SUSDE_RICH }}
+          REGIME_HLP_WARM: ${{ vars.REGIME_HLP_WARM }}
+          REGIME_HLP_RICH: ${{ vars.REGIME_HLP_RICH }}
+          REGIME_FUNDING_WARM: ${{ vars.REGIME_FUNDING_WARM }}
+          REGIME_FUNDING_RICH: ${{ vars.REGIME_FUNDING_RICH }}
+        run: polybot regime --github-issue --summary "$GITHUB_STEP_SUMMARY"

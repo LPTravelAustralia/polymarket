@@ -25,6 +25,11 @@ exists.
 Reproduce with `polybot funding --coins BTC,ETH,SOL --days 365`, and the
 measured-cost version with `polybot hedge-cost`.
 
+**Read with REGIME.md.** This was measured over September 2025 – September
+2026, the bottom of the funding cycle: Hyperliquid BTC funding ran 18–30% a
+year through 2024 and 3–9% in 2026. The capacity ceiling above is a
+statement about this regime.
+
 ---
 
 ## 1. First, the quoted number is wrong

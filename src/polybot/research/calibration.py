@@ -32,6 +32,7 @@ Costs are charged per contract at its own published taker rate and the
 
 from __future__ import annotations
 
+import math
 import random
 import statistics
 from dataclasses import dataclass, field
@@ -123,6 +124,41 @@ def _event_bootstrap(cs: list[Contract], n_boot: int, rng: random.Random
     return edges
 
 
+def _log_pmf(k: int, n: int, p: float) -> float:
+    if p <= 0.0:
+        return 0.0 if k == 0 else float("-inf")
+    if p >= 1.0:
+        return 0.0 if k == n else float("-inf")
+    return (math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+            + k * math.log(p) + (n - k) * math.log1p(-p))
+
+
+def binomial_two_sided_p(k: int, n: int, p: float) -> float:
+    """Exact two-sided binomial test: P(an outcome at least as unlikely)."""
+    lp = [_log_pmf(i, n, p) for i in range(n + 1)]
+    obs = lp[k]
+    return min(1.0, sum(math.exp(v) for v in lp if v <= obs + 1e-9))
+
+
+def clopper_pearson(k: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """Exact confidence interval for a binomial proportion."""
+    def cdf(p: float, upto: int) -> float:
+        return sum(math.exp(_log_pmf(i, n, p)) for i in range(upto + 1))
+
+    def solve(f, lo=0.0, hi=1.0):
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if f(mid):
+                hi = mid
+            else:
+                lo = mid
+        return (lo + hi) / 2
+
+    lower = 0.0 if k == 0 else solve(lambda q: 1.0 - cdf(q, k - 1) >= alpha / 2)
+    upper = 1.0 if k == n else solve(lambda q: cdf(q, k) <= alpha / 2)
+    return lower, upper
+
+
 def benjamini_hochberg(p_values: list[float]) -> list[float]:
     """q-values: the false-discovery rate at which each test is significant."""
     m = len(p_values)
@@ -170,6 +206,17 @@ def calibrate(
         # zero, is at least as extreme as the observed edge.
         centred = [b - e for b in boot]
         pv = sum(1 for b in centred if abs(b) >= abs(e)) / n_boot
+        # The bootstrap cannot see uncertainty it has no variation to
+        # resample: a band where every contract won returns a zero-width
+        # interval and a tiny p-value. 70 of 70 at 97.7c is what a 97.7%
+        # true rate produces a fifth of the time. The exact binomial test is
+        # a floor -- clustering can only widen uncertainty, never narrow it --
+        # so the wider of the two intervals and the larger p-value are used.
+        k = sum(1 for c in cs if c.won)
+        cp_lo, cp_hi = clopper_pearson(k, len(cs))
+        lo_ci = min(lo_ci, cp_lo - p)
+        hi_ci = max(hi_ci, cp_hi - p)
+        pv = max(pv, binomial_two_sided_p(k, len(cs), min(max(p, 1e-9), 1 - 1e-9)))
         results.append(BandResult(
             lo=lo, hi=hi, n=len(cs),
             events=len({c.event_id or c.market_id for c in cs}),

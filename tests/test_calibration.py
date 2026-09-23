@@ -12,7 +12,9 @@ import pytest
 from polybot.research.calibration import (
     Contract,
     benjamini_hochberg,
+    binomial_two_sided_p,
     calibrate,
+    clopper_pearson,
 )
 
 
@@ -104,3 +106,34 @@ class TestBH:
         q = benjamini_hochberg(ps)
         order = sorted(range(5), key=lambda i: ps[i])
         assert all(q[order[i]] <= q[order[i + 1]] for i in range(4))
+
+
+class TestDegenerateBands:
+    """A band where every contract resolved the same way has no variation for
+    a bootstrap to resample. The first live run reported 70 of 70 winners at
+    97.7c as significant (q = 0.011); a 97.7% true rate produces that ~20% of
+    the time."""
+
+    def test_all_winners_near_certainty_is_not_significant(self):
+        cs = [Contract(f"m{i}", f"e{i}", 0.977, True, 0.0, "x", 7.0) for i in range(70)]
+        (b,), _ = calibrate(cs, bands=(0.9, 1.0), decided=0.015, n_boot=200)
+        assert not b.significant
+        assert b.ci_lo < 0 < b.ci_hi
+
+    def test_all_losers_at_two_cents_is_not_significant(self):
+        cs = [Contract(f"m{i}", f"e{i}", 0.021, False, 0.0, "x", 7.0) for i in range(80)]
+        (b,), _ = calibrate(cs, bands=(0.0, 0.05), decided=0.015, n_boot=200)
+        assert not b.significant
+
+    def test_exact_binomial(self):
+        # Two-sided: at least the one-sided tail, since equally unlikely
+        # outcomes on the other side count too.
+        p = binomial_two_sided_p(70, 70, 0.977)
+        assert 0.977 ** 70 <= p <= 1.0
+        assert binomial_two_sided_p(50, 100, 0.5) == pytest.approx(1.0)
+        assert binomial_two_sided_p(0, 100, 0.5) == pytest.approx(2 * 0.5 ** 100)
+
+    def test_clopper_pearson_known_value(self):
+        lo, hi = clopper_pearson(70, 70)
+        assert hi == 1.0
+        assert lo == pytest.approx(0.025 ** (1 / 70), abs=1e-6)

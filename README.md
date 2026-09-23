@@ -45,6 +45,7 @@ results are worth more than the code:
 | [FUNDING.md](FUNDING.md) | Perp carry — the one candidate that works, measured against live order books, and capped at roughly $1–2k a year above cash |
 | [MEMECOINS.md](MEMECOINS.md) | pump.fun, Axiom, copy trading, and why repetition amplifies a negative edge |
 | [REGIME.md](REGIME.md) | Buying the house's side (HLP) and the carry (sUSDe) instead of building it, why timing is most of the story, and the monitor that watches for it |
+| [SIGNALS.md](SIGNALS.md) | Every observable feature tested as a buy/sell trigger: none predicts direction; volatility is predictable, and two risk rules held up out of sample |
 
 **The short version.** Eleven of twelve candidates failed, and they failed
 for one reason rather than twelve: fees and adverse selection exceed the
@@ -61,6 +62,12 @@ can often be bought rather than built, and all twelve were measured in the
 quietest year since 2023. The same carry paid 17.5% in 2024 and pays cash
 today. `polybot regime` — run every six hours by a GitHub Action — reports
 which of those markets you are in.
+
+And no buy/sell trigger was found. Seventeen pre-registered features, from
+momentum and RSI to funding, flows and implied volatility, were tested out
+of sample against what BTC and ETH did next; none predicted direction.
+Volatility, though, is predictable, and a plain 200-day trend filter roughly
+halved the worst drawdown in years it never saw (SIGNALS.md).
 
 The winners at every venue were structurally advantaged rather than skilled:
 a 20-second broadcast lag, a mint address known before it existed, a 1% fee
@@ -121,9 +128,13 @@ Two corollaries the bot exploits:
 - **The tails are cheap.** The `p(1−p)` term means a trade at 0.95 costs about
   a fifth of one at 0.50. Tail mispricing is disproportionately where the
   fee-adjusted money is — which is also why the devig method matters (below).
-- **Some categories are free.** Geopolitics and world events carry no taker
-  fee, so a mispricing that isn't tradeable in crypto is tradeable there.
-  `find_complement_arb` picks this up automatically from the live rate.
+- **Some markets are free.** Checked live on 23 September 2026, the
+  fee-free markets are almost entirely NFL and college football
+  (`feeType: zero_fees`, ~19,000 markets) plus older markets created before
+  fees existed. New geopolitics markets — once listed here as free — charge
+  the 4% politics rate. Every market publishes its own rate, which
+  `FeeSchedule.from_market` reads directly; see STRATEGY.md for what the
+  fee-free markets turned out to contain.
 
 ### 4. The top accounts are not doing one thing — and only one is copyable
 

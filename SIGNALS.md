@@ -124,6 +124,15 @@ contradiction: the rule does not know where the market is going; it steps
 aside during the long declines that make up crypto's worst losses, and pays
 for it in whipsaws.
 
+**Is 200 special? No, which is the point.** Re-run at 50, 100, 150, 250 and
+300 days, in both periods, for both coins, the rule reduced the worst
+drawdown against holding in **all 24 cases** — in 2024–26, BTC's −53% became
+−26% to −36% whatever the window, ETH's −68% became −38% to −52%. Returns
+were mixed: sometimes above holding, sometimes below. A result that only
+appeared at exactly 200 days would be a fitted accident; one that appears at
+every window is a property of trend-following. Shorter windows switch far
+more often (15–25 times a year at 50 days), which matters for tax.
+
 **Volatility targeting** — hold less when trailing volatility is high
 (exposure = 50% ÷ 30-day vol, capped at 100%), 2024–26: BTC +28.1% vs +27.4%
 holding, same drawdown (BTC rarely exceeded the target); ETH +14.8% vs +5.6%,

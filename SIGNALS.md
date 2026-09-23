@@ -154,6 +154,17 @@ still be worth it, but that is your accountant's arithmetic, not this repo's.
 | Should I be in at all? | Price vs 200-day average, shown in the monitor | Halved drawdowns out of sample; not a return forecast |
 | Should I buy / sell now? | — | Nothing tested predicts direction |
 
+## Polymarket: are prices honest probabilities?
+
+Yes, within the noise. Across 7,297 resolved markets, price observed 1 and 7
+days before each market's scheduled end, no price band's win rate differed
+from its price once corrected for the 88 bands examined. The favourite-
+longshot bias that betting markets are known for shows up only in the
+smallest markets and does not survive correction. A live scan of all ~20,000
+fee-free markets found no guaranteed-profit mispricing. Details, including
+two false edges that were caught and removed, are in STRATEGY.md under
+*Closing the open items*.
+
 ## What was not tested
 
 - **On-chain flows** (exchange inflows, whale wallets): no free, reachable

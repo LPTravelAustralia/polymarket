@@ -9,7 +9,7 @@ returned 79% in 2024 and roughly 0-3% annualised over the last two quarters.
 These are cyclical payoffs. They are close to worthless most of the time and
 pay very well in euphoric, volatile markets. So the useful question is not
 "is this a good trade" but "is this a good trade *right now*", and that is a
-question a scheduled job can answer. This module takes three readings:
+question a scheduled job can answer. This module takes four readings:
 
 - **sUSDe 30-day yield** -- the funding carry, run by Ethena at scale and
   sold as a token. The cleanest read on what the carry pays after
@@ -19,12 +19,16 @@ question a scheduled job can answer. This module takes three readings:
 - **BTC/ETH 30-day funding** -- the raw input to the carry, gross. Thirty
   days because that is the horizon its persistence was measured at; a
   seven-day window flipped level 15-36 times a year near a threshold.
+- **BTC/ETH 3-month locked rate** -- the premium on Deribit's dated futures,
+  annualised: a rate that can be fixed for months rather than hoped for.
+  Six years of history, the longest of the four.
 
 Each is classified QUIET / WARMING / RICH against explicit thresholds.
-**Only the first and third set the regime.** Both are persistent -- this
-month's sUSDe yield predicts next month's at a correlation of +0.75 over 30
-non-overlapping months, and trailing funding predicts forward funding at
-+0.51 -- so a RICH reading says something about the weeks ahead.
+**sUSDe, funding and the locked rate set the regime.** All three are
+persistent -- this month's reading predicts next month's at +0.75, +0.51 and
++0.83 respectively -- so a RICH reading says something about the weeks ahead.
+The gap between Hyperliquid funding and the locked rate is shown alongside,
+as context.
 
 HLP's trailing return does not. Its gains arrive in single liquidation
 cascades (+9.7% in the first fortnight of October 2025, +7.0% in late
@@ -69,8 +73,9 @@ HOURS_PER_YEAR = 24 * 365
 # What a perp pays at fair value on Hyperliquid, annualised.
 FUNDING_INTEREST_BASELINE = 0.0001 / 8 * HOURS_PER_YEAR     # 10.95%
 
-# The 3-month US T-bill on 18 Sep 2026. For an Australian entity the honest
-# hurdle is your own term-deposit rate; set REGIME_HURDLE to that.
+# The 3-month US T-bill on 18 Sep 2026. Every yield watched here is in US
+# dollars, so US cash is the like-for-like comparison; an AUD term-deposit
+# rate only compares fairly if the currency is hedged (REGIME.md, Currency).
 DEFAULT_HURDLE = 0.0408
 
 
@@ -113,6 +118,12 @@ DEFAULT_THRESHOLDS = {
     "sUSDe 30d yield": Thresholds(warm=0.065, rich=0.10),
     "HLP 90d return": Thresholds(warm=0.10, rich=0.20),
     "BTC/ETH 30d funding": Thresholds(warm=0.15, rich=0.25),
+    # The ~3-month rate lockable on Deribit dated futures, 30-day mean of the
+    # BTC/ETH average. Calibrated on 2020-2026: in sUSDe's QUIET months it
+    # averaged 4.5%, WARMING 7.4%, RICH 13.2%. Replayed daily, these
+    # thresholds read RICH on 58% of 2021 and 51% of 2024 and QUIET on every
+    # day of 2022 and 2026, changing level about four times a year.
+    "BTC/ETH 3m locked rate": Thresholds(warm=0.08, rich=0.11),
 }
 
 # An open alert is only downgraded once the reading is this far below the
@@ -125,6 +136,7 @@ _ENV_KEYS = {
     "sUSDe 30d yield": "SUSDE",
     "HLP 90d return": "HLP",
     "BTC/ETH 30d funding": "FUNDING",
+    "BTC/ETH 3m locked rate": "BASIS",
 }
 
 
@@ -167,6 +179,9 @@ class Signal:
     # False for signals with no demonstrated persistence, which are shown
     # for context but must not open, escalate or close an alert.
     drives_regime: bool = True
+    # False for gauges that are not yields at all (trend, volatility), so
+    # comparing them with cash would be meaningless.
+    is_yield: bool = True
 
     @property
     def available(self) -> bool:
@@ -356,16 +371,199 @@ def read_funding(thresholds: Thresholds, *, days: int = 30,
     return s
 
 
+def basis_30d_mean(futures: dict[str, dict], spot_close: dict[str, float],
+                   *, days: int = 30) -> tuple[float, int] | None:
+    """Mean of the constant-maturity ~3m locked rate over the last `days`.
+
+    Daily readings are too noisy to alert on -- replayed over 2020-2026 the
+    raw daily rate changed level ~130 times a year and even a 7-day median
+    ~20-28 times -- because thin daily closes on the quarterlies produce
+    spikes. The 30-day mean is the horizon the persistence (+0.83) was
+    measured at. Returns (mean, observations) or None.
+    """
+    from ..venues.deribit import constant_maturity
+
+    pts = constant_maturity(futures, spot_close)[-days:]
+    if len(pts) < days // 2:
+        return None
+    return statistics.fmean(p.basis for p in pts), len(pts)
+
+
+def _coinbase_daily_closes(product: str, days: int) -> dict[str, float]:
+    end = datetime.now(timezone.utc)
+    start = end.timestamp() - (days + 2) * 86400
+    url = (f"https://api.exchange.coinbase.com/products/{product}/candles?"
+           f"granularity=86400&start={datetime.fromtimestamp(start, timezone.utc).isoformat()}"
+           f"&end={end.isoformat()}")
+    out = {}
+    for t, _lo, _hi, _op, close, _vol in _http_json(url):
+        out[datetime.fromtimestamp(t, timezone.utc).date().isoformat()] = float(close)
+    return out
+
+
+def _deribit_quarterlies(currency: str, days: int) -> dict[str, dict]:
+    """Daily closes for every quarterly that could be ~3 months out at some
+    point in the window: the next three quarterly expiries."""
+    from ..venues.deribit import last_friday, quarterly_name
+
+    today = datetime.now(timezone.utc).date()
+    out = {}
+    y, found = today.year, 0
+    while found < 3:
+        for m in (3, 6, 9, 12):
+            exp = last_friday(y, m)
+            if exp <= today or found >= 3:
+                continue
+            found += 1
+            name = quarterly_name(currency, exp)
+            start_ms = int((time.time() - (days + 2) * 86400) * 1000)
+            r = _http_json(
+                "https://www.deribit.com/api/v2/public/get_tradingview_chart_data?"
+                f"instrument_name={name}&start_timestamp={start_ms}"
+                f"&end_timestamp={int(time.time() * 1000)}&resolution=1D")["result"]
+            if r.get("status") == "ok" and r.get("ticks"):
+                exp_ms = int(datetime(exp.year, exp.month, exp.day, 8,
+                                      tzinfo=timezone.utc).timestamp() * 1000)
+                out[name] = {"expiry_ms": exp_ms, "ticks": r["ticks"],
+                             "close": r["close"]}
+            time.sleep(0.2)
+        y += 1
+    return out
+
+
+def read_basis(thresholds: Thresholds, *, days: int = 30,
+               coins: tuple[str, ...] = ("BTC", "ETH")) -> Signal:
+    s = Signal("BTC/ETH 3m locked rate", thresholds)
+    try:
+        per = {}
+        for c in coins:
+            r = basis_30d_mean(_deribit_quarterlies(c, days + 5),
+                               _coinbase_daily_closes(f"{c}-USD", days + 5), days=days)
+            if r is None:
+                raise ValueError(f"{c}: not enough daily readings")
+            per[c] = r[0]
+        s.value = statistics.fmean(per.values())
+        s.detail = (", ".join(f"{c} {v:+.1%}" for c, v in per.items())
+                    + " -- a rate you can lock for ~3 months on Deribit")
+    except Exception as exc:                          # noqa: BLE001
+        s.error = str(exc)[:200]
+    return s
+
+
+def gap_signal(funding: Signal, basis: Signal) -> Signal:
+    """Hyperliquid floating funding minus Deribit's locked rate.
+
+    Shorting Hyperliquid's perp against a long Deribit future collected this
+    spread, and it was positive in 25 of 26 non-overlapping quarters from
+    mid-2023 -- because Hyperliquid funding carries a built-in ~11% interest
+    baseline and Deribit does not. But it was +11-12% in 2024 and 1.5-3.5%
+    in 2025-26, before fees, margin at two venues, and ADL risk. Context,
+    not a trigger: its month-to-month persistence is only +0.3-0.4.
+    """
+    g = Signal("HL minus Deribit gap", Thresholds(warm=float("inf"), rich=float("inf")),
+               is_net=False, drives_regime=False)
+    if funding.available and basis.available:
+        g.value = funding.value - basis.value
+        g.detail = ("what shorting Hyperliquid against a long Deribit future "
+                    "collects, gross; see REGIME.md before treating it as free")
+    else:
+        g.error = "needs both funding and locked rate"
+    return g
+
+
+_NEVER = Thresholds(warm=float("inf"), rich=float("inf"))
+
+
+def trend_gap(closes: list[float], window: int = 200) -> float | None:
+    """Last close relative to its `window`-day simple average."""
+    if len(closes) < window:
+        return None
+    return closes[-1] / statistics.fmean(closes[-window:]) - 1.0
+
+
+def percentile_rank(history: list[float], value: float) -> float:
+    """Share of `history` at or below `value`."""
+    if not history:
+        return float("nan")
+    return sum(1 for h in history if h <= value) / len(history)
+
+
+def read_trend(coins: tuple[str, ...] = ("BTC", "ETH")) -> Signal:
+    """Price against its 200-day average: a risk gauge, not a trigger.
+
+    SIGNALS.md: the gap did not predict next week's or next month's return
+    (IC flipped from +0.14 to -0.05 out of sample), but the rule "hold only
+    above the average" roughly halved the worst drawdown in both test
+    periods for both coins. It is shown so you know which side of it you
+    are on; it never raises an alert.
+    """
+    s = Signal("Trend: price vs 200-day avg", _NEVER, is_net=False,
+               drives_regime=False, is_yield=False)
+    try:
+        per = {}
+        for c in coins:
+            closes = _coinbase_daily_closes(f"{c}-USD", 210)
+            g = trend_gap([closes[d] for d in sorted(closes)])
+            if g is None:
+                raise ValueError(f"{c}: fewer than 200 daily closes")
+            per[c] = g
+        s.value = per[coins[0]]
+        s.detail = ", ".join(
+            f"{c} {g:+.1%} ({'above -- in trend' if g > 0 else 'below -- out of trend'})"
+            for c, g in per.items())
+    except Exception as exc:                          # noqa: BLE001
+        s.error = str(exc)[:200]
+    return s
+
+
+def read_implied_vol(coins: tuple[str, ...] = ("BTC", "ETH")) -> Signal:
+    """Deribit implied volatility (DVOL), with its rank over the past year.
+
+    The one feature in SIGNALS.md that predicted anything in both test
+    periods: high implied volatility meant high realised volatility the
+    following month (BTC IC +0.61, then +0.46 out of sample). It says how
+    violent the next month is likely to be, not which way -- a reason to
+    size down, never to sell.
+    """
+    s = Signal("Implied vol (DVOL)", _NEVER, is_net=False, drives_regime=False,
+               is_yield=False)
+    try:
+        now = int(time.time() * 1000)
+        per = {}
+        for c in coins:
+            rows = _http_json(
+                "https://www.deribit.com/api/v2/public/get_volatility_index_data?"
+                f"currency={c}&start_timestamp={now - 370 * 86_400_000}"
+                f"&end_timestamp={now}&resolution=86400")["result"]["data"]
+            closes = [r[4] / 100.0 for r in rows]
+            if len(closes) < 200:
+                raise ValueError(f"{c}: only {len(closes)} days of DVOL")
+            per[c] = (closes[-1], percentile_rank(closes, closes[-1]))
+            time.sleep(0.2)
+        s.value = per[coins[0]][0]
+        s.detail = ", ".join(f"{c} {v:.0%} ({pr:.0%} of the past year was lower or equal)"
+                             for c, (v, pr) in per.items())
+    except Exception as exc:                          # noqa: BLE001
+        s.error = str(exc)[:200]
+    return s
+
+
 def take_reading(
     thresholds: dict[str, Thresholds] | None = None,
     hurdle: float | None = None,
 ) -> Reading:
     t = thresholds or thresholds_from_env()
+    funding = read_funding(t["BTC/ETH 30d funding"])
+    basis = read_basis(t["BTC/ETH 3m locked rate"])
     return Reading(
         signals=[
             read_susde(t["sUSDe 30d yield"]),
+            funding,
+            basis,
             read_hlp(t["HLP 90d return"]),
-            read_funding(t["BTC/ETH 30d funding"]),
+            gap_signal(funding, basis),
+            read_trend(),
+            read_implied_vol(),
         ],
         hurdle=hurdle_from_env() if hurdle is None else hurdle,
     )
@@ -394,13 +592,16 @@ def render_markdown(r: Reading, *, shown: Level | None = None) -> str:
         if s.available:
             lines.append(
                 f"| {s.name} | **{s.value:+.2%}** | "
-                f"{f'{s.value - r.hurdle:+.2%}' if s.is_net else 'gross, n/a'} "
+                + (f"{s.value - r.hurdle:+.2%}" if s.is_net
+                   else "gross, n/a" if s.is_yield else "—")
+                + " "
                 f"| {s.level.name if s.drives_regime else 'context only'} "
                 + (f"| {s.thresholds.warm:.1%} / {s.thresholds.rich:.1%} |"
                    if s.drives_regime else "| — |"))
         else:
             lines.append(f"| {s.name} | unavailable | — | — | "
-                         f"{s.thresholds.warm:.1%} / {s.thresholds.rich:.1%} |")
+                         + (f"{s.thresholds.warm:.1%} / {s.thresholds.rich:.1%} |"
+                            if s.drives_regime else "— |"))
     lines.append("")
     for s in r.signals:
         if s.available and s.detail:
@@ -408,13 +609,15 @@ def render_markdown(r: Reading, *, shown: Level | None = None) -> str:
         elif s.error:
             lines.append(f"- **{s.name}:** could not be read — `{s.error}`")
     if any(not s.drives_regime for s in r.signals):
-        lines += ["", "HLP is shown for context only: its past return has not "
-                      "predicted its next one (it is paid by liquidation "
-                      "cascades, which do not announce themselves)."]
+        lines += ["", "Rows marked *context only* never raise or lower an alert. "
+                      "HLP's past return has not predicted its next one; the "
+                      "gap is only weakly persistent; trend and implied vol are "
+                      "risk gauges -- they tell you how rough the ride is likely "
+                      "to be, not which way it goes (SIGNALS.md)."]
     lines += [
         "",
-        f"Cash hurdle: **{r.hurdle:.2%}** (set `REGIME_HURDLE` to your own "
-        "term-deposit rate). "
+        f"Cash hurdle: **{r.hurdle:.2%}** (US cash by default; `REGIME_HURDLE` "
+        "changes it -- see REGIME.md on currency). "
         + ("" if r.complete else
            "**Reading is incomplete**, so an open alert will not be closed "
            "on it. "),

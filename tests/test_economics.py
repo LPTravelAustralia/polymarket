@@ -74,8 +74,35 @@ class TestFeeSchedule:
         assert FeeSchedule.for_category("not-a-category").taker_rate == 0.05
         assert FeeSchedule.for_category(None).taker_rate == 0.05
 
-    def test_fee_free_categories(self):
-        assert FeeSchedule.for_category("geopolitics").taker_rate == 0.0
+    def test_no_category_falls_back_to_zero(self):
+        """Geopolitics used to be fee-free; new markets there now charge the
+        4% politics rate. A zero fallback makes marginal trades look
+        profitable, so no category falls back to it."""
+        assert FeeSchedule.for_category("geopolitics").taker_rate == 0.04
+        assert all(FeeSchedule.for_category(c).taker_rate > 0
+                   for c in ("sports", "world", "politics", "crypto"))
+
+
+class TestFromMarket:
+    def test_reads_the_markets_own_schedule(self):
+        m = {"feeType": "sports_fees_v3", "feesEnabled": True,
+             "feeSchedule": {"exponent": 1, "rate": 0.05, "takerOnly": True,
+                             "rebateRate": 0.15}}
+        s = FeeSchedule.from_market(m)
+        assert s.taker_rate == pytest.approx(0.05)
+        assert s.maker_rebate_share == pytest.approx(0.15)
+
+    def test_zero_fee_markets(self):
+        m = {"feeType": "zero_fees", "feesEnabled": True,
+             "feeSchedule": {"rate": 0, "rebateRate": 0}}
+        assert FeeSchedule.from_market(m).taker_rate == 0.0
+
+    def test_legacy_markets_created_before_fees_are_free(self):
+        assert FeeSchedule.from_market({"feeType": None}).taker_rate == 0.0
+
+    def test_unknown_falls_back_by_category(self):
+        m = {"feeType": "politics_fees", "feesEnabled": True}
+        assert FeeSchedule.from_market(m, "politics").taker_rate == pytest.approx(0.04)
 
 
 class TestEvaluateTrade:

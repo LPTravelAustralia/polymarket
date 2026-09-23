@@ -2,9 +2,10 @@
 # and keeps one GitHub issue in step with the answer. See REGIME.md.
 #
 # Settings (repository Settings > Secrets and variables > Actions):
-#   variable REGIME_HURDLE       your cash rate, e.g. 4.5 for 4.5% (default 4.08)
+#   variable REGIME_HURDLE       cash rate for the report, e.g. 4.5 (default 4.08, US cash)
 #   variable REGIME_SUSDE_WARM / _RICH, REGIME_HLP_WARM / _RICH,
-#            REGIME_FUNDING_WARM / _RICH   threshold overrides, same format
+#            REGIME_FUNDING_WARM / _RICH, REGIME_BASIS_WARM / _RICH
+#                                          threshold overrides, same format
 #   secret   REGIME_WEBHOOK_URL  optional Slack or Discord webhook
 name: Regime monitor
 
@@ -45,4 +46,6 @@ jobs:
           REGIME_HLP_RICH: ${{ vars.REGIME_HLP_RICH }}
           REGIME_FUNDING_WARM: ${{ vars.REGIME_FUNDING_WARM }}
           REGIME_FUNDING_RICH: ${{ vars.REGIME_FUNDING_RICH }}
+          REGIME_BASIS_WARM: ${{ vars.REGIME_BASIS_WARM }}
+          REGIME_BASIS_RICH: ${{ vars.REGIME_BASIS_RICH }}
         run: polybot regime --github-issue --summary "$GITHUB_STEP_SUMMARY"

@@ -33,12 +33,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Fallback taker rates by Polymarket category, used only when the live
-# /fee-rate endpoint is unreachable. These move -- treat them as a safety net,
-# not as truth. FeeBook.from_clob() fetches the authoritative per-token rate.
+# Fallback taker rates by Polymarket category, used only when neither the
+# market's own `feeSchedule` nor the live /fee-rate endpoint is available.
+# These move -- treat them as a safety net, not as truth.
+#
+# Checked against live market records on 23 Sep 2026: sports is now 5%
+# (sports_fees_v3), not the 3% first recorded here. Geopolitics and world
+# events are no longer blanket fee-free -- new markets there carry
+# politics_fees at 4%, and only older markets created before fees existed
+# are exempt. The fee-free universe today is almost entirely NFL and college
+# football (feeType "zero_fees"), which `from_market` reads directly.
+# A fallback of zero is the dangerous failure, so neither falls back to it.
 FALLBACK_TAKER_RATES: dict[str, float] = {
     "crypto": 0.07,
-    "sports": 0.03,
+    "sports": 0.05,
     "finance": 0.04,
     "politics": 0.04,
     "mentions": 0.04,
@@ -46,8 +54,8 @@ FALLBACK_TAKER_RATES: dict[str, float] = {
     "economics": 0.05,
     "culture": 0.05,
     "weather": 0.05,
-    "geopolitics": 0.0,
-    "world": 0.0,
+    "geopolitics": 0.04,
+    "world": 0.04,
 }
 DEFAULT_TAKER_RATE = 0.05
 
@@ -98,6 +106,25 @@ class FeeSchedule:
             taker_rate=FALLBACK_TAKER_RATES.get(key, DEFAULT_TAKER_RATE),
             maker_rebate_share=MAKER_REBATE_SHARE.get(key, DEFAULT_MAKER_REBATE_SHARE),
         )
+
+    @classmethod
+    def from_market(cls, market: dict, category: str | None = None) -> "FeeSchedule":
+        """Read the fee terms a gamma market record carries about itself.
+
+        Since 2026 every market publishes `feeType` and a `feeSchedule` with
+        its taker `rate` and maker `rebateRate`. That is the authoritative
+        figure for that market. Markets created before fees existed carry
+        neither and pay nothing. Anything else falls back by category.
+        """
+        sched = market.get("feeSchedule") or {}
+        if "rate" in sched:
+            return cls(
+                taker_rate=float(sched["rate"]),
+                maker_rebate_share=float(sched.get("rebateRate", 0.0)),
+            )
+        if market.get("feeType") is None and not market.get("feesEnabled"):
+            return cls(taker_rate=0.0, maker_rebate_share=0.0)
+        return cls.for_category(category)
 
     @classmethod
     def from_bps(cls, base_fee_bps: int, category: str | None = None) -> "FeeSchedule":

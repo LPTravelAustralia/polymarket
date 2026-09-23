@@ -323,3 +323,81 @@ with a different test.
 
 Steps 1–3 cost an hour and can kill the strategy. That is the whole point of
 the ordering.
+
+---
+
+## Closing the open items (23 September 2026)
+
+The list above said steps 1–3 "cost an hour and can kill the strategy".
+They were never run before the work moved to Hyperliquid. They have been
+now, in a stronger form than first planned.
+
+### Step 2: fee-free categories — open, and empty
+
+Polymarket now publishes each market's fee terms on the market itself
+(`feeType`, `feeSchedule`). Read live across every active market, two
+things had changed since this document was written:
+
+- **Geopolitics is no longer fee-free.** New geopolitics and world markets
+  carry `politics_fees` at 4%. Only markets created before fees existed are
+  exempt.
+- **The fee-free universe is football.** 19,007 active markets are marked
+  `zero_fees` — all but four of them NFL or college football — plus 1,011
+  older markets with no fee schedule.
+
+So the fee wall that killed Gate 3 does not exist in ~20,000 markets. The
+question is whether anything is left to take once it is gone. A live scan
+of all of them, against their order books:
+
+| Structure that must pay exactly $1 | Checked | With a positive edge |
+|---|---|---|
+| YES + NO of one market, bought (or split and sold) | 35,448 | **0** |
+| YES of every outcome in a multi-outcome event | 43 | 1 (+3.7¢, 6 shares ≈ $0.22) |
+
+Liquid markets are priced consistently to within the 1–4¢ spread.
+Removing the fee does not uncover an edge; the complete-set identity is
+simply held, fee or no fee.
+
+### Are the prices themselves honest?
+
+The deeper version of "trade away from 0.50" is whether contracts at a given
+price win at that rate — the favourite-longshot bias betting markets are
+known for. Tested on 7,297 resolved markets sampled from 425,883 with at
+least $10k of volume, price observed 1 and 7 days before each market's
+**scheduled** end:
+
+- **No price band's win rate differs from its price** once corrected for the
+  88 bands examined across every cut (all markets, both horizons, early and
+  late halves, three volume buckets, four categories). Smallest corrected
+  q-value: 0.365.
+- The best candidate — contracts at 15–30¢ one day out, winning 27.5% at an
+  average price of 22.9% — held its sign in both halves (+5.8%, then +3.3%)
+  but was not significant in the later one. Worth watching, not trading.
+- The classic longshot bias appears only in the smallest markets ($10–50k),
+  and does not survive the global correction.
+
+**Two false edges were found and removed on the way, and both are worth
+knowing about** because they are how most published "Polymarket edges" are
+made:
+
+1. **Measuring from the actual close leaks the outcome.** A "Will X happen
+   by December?" market closes early when X happens, so a snapshot "7 days
+   before close" of a YES market is taken early, while its price was low.
+   The first run, anchored that way, showed cheap contracts winning +5%
+   more than their price (q = 0.044). Anchored on the scheduled end date,
+   which is fixed at creation, it fell to +2% and noise.
+2. **All-winner bands fool a bootstrap.** 70 of 70 contracts at 97.7¢ won,
+   and the resampling reported near-certainty. A true 97.7% rate produces
+   that result a fifth of the time; the exact test gives p = 0.41. The
+   calibration engine now takes the wider of the bootstrap and exact
+   binomial intervals.
+
+### Steps 1 and 3: moot
+
+Step 1 (make one leg a maker fill) and step 3 (measure capital lock-up on
+closed positions) existed to rescue a strategy whose edge was being eaten by
+fees. With fees removed entirely in 20,000 markets and no edge appearing,
+there is nothing for either to rescue.
+
+**Verdict on Polymarket: closed.** The fee was the visible problem; underneath
+it, the prices are honest and the identities hold.

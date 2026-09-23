@@ -11,6 +11,8 @@
 
     polybot run --dry-run --cycles 5      # quoting loop, sends nothing
     polybot run --sports                  # quote using the odds-based model
+
+    polybot regime                        # is the market paying for risk now?
 """
 
 from __future__ import annotations
@@ -118,6 +120,91 @@ def cmd_repeat(args: argparse.Namespace, settings: Settings) -> int:
 
     dist = LogNormalReturns.from_mean_and_median(args.mean, args.median)
     print(render_repetition(dist, cost=args.cost, trades=args.trades))
+    return 0
+
+
+def cmd_regime(args: argparse.Namespace, settings: Settings) -> int:
+    """Is the market paying for carrying risk right now?"""
+    import os
+
+    from .monitor.regime import render_markdown, take_reading
+
+    reading = take_reading()
+    report = render_markdown(reading)
+    print(report)
+
+    if args.summary:
+        with open(args.summary, "a", encoding="utf-8") as f:
+            f.write(report + "\n")
+
+    if reading.level is None:
+        log.error("No data source could be read; no regime reported.")
+        return 1
+
+    if args.github_issue:
+        from .monitor.alerts import GitHubIssues, apply
+
+        if not (os.environ.get("GITHUB_TOKEN")
+                and os.environ.get("GITHUB_REPOSITORY")):
+            log.error("--github-issue needs GITHUB_TOKEN and GITHUB_REPOSITORY")
+            return 1
+        action = apply(reading, GitHubIssues.from_env(),
+                       webhook=os.environ.get("REGIME_WEBHOOK_URL") or None)
+        print(f"\nalert action: {action.value}")
+    return 0
+
+
+def cmd_hedge_cost(args: argparse.Namespace, settings: Settings) -> int:
+    """Measure hedge execution from live books, then price the carry on it."""
+    import json
+    import urllib.request
+
+    from .venues.funding import fetch_funding_history
+    from .venues.hedge_cost import (
+        USER_AGENT,
+        breakeven_spot_fee,
+        carry_on_measured_costs,
+        render_survey,
+        survey,
+    )
+    from .venues.hyperliquid import HyperliquidAPI
+
+    coins = [c.strip() for c in args.coins.split(",") if c.strip()]
+    sizes = tuple(float(x) for x in args.sizes.split(",") if x.strip())
+
+    req = urllib.request.Request("https://api.exchange.coinbase.com/products",
+                                 headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        products = {p["id"] for p in json.load(r)
+                    if p.get("status") == "online" and not p.get("trading_disabled")}
+
+    s = survey(coins, products, sizes=sizes, snapshots=args.snapshots,
+               interval=args.interval)
+    print(render_survey(s))
+
+    series = {}
+    with HyperliquidAPI() as api:
+        for c in coins:
+            ser = fetch_funding_history(api, c, days=args.days, pause=0.4)
+            if len(ser) >= 24 * 60:
+                series[c] = ser
+
+    print(f"\nTop-{args.top} carry, monthly rebalance, on measured costs "
+          f"(spot fee {args.spot_fee:.2%}, hurdle {args.hurdle:.2%})")
+    print("=" * 78)
+    for size in sizes:
+        r, universe = carry_on_measured_costs(series, s, size,
+                                              spot_fee=args.spot_fee,
+                                              top_n=args.top)
+        capital = size * args.top * r.costs.capital_multiplier
+        be = breakeven_spot_fee(series, s, size, hurdle=args.hurdle,
+                                top_n=args.top)
+        excess = r.net_apr_on_capital - args.hurdle
+        print(f"  ${size:>9,.0f} per name (~${capital:,.0f} capital): "
+              f"{len(universe)} names fillable, net {r.net_apr_on_capital:+.2%}, "
+              f"vs hurdle {excess:+.2%} (${excess * capital:+,.0f}/yr), "
+              "break-even spot fee "
+              + (f"{be:.3%}" if be is not None else "none"))
     return 0
 
 
@@ -671,6 +758,31 @@ def build_parser() -> argparse.ArgumentParser:
                     help="all-in round-trip execution cost")
     rp.add_argument("--trades", type=int, default=100)
     rp.set_defaults(func=cmd_repeat)
+
+    rg = sub.add_parser("regime",
+                        help="is the market paying for carrying risk right now?")
+    rg.add_argument("--github-issue", action="store_true",
+                    help="open/update/close the alert issue (for CI)")
+    rg.add_argument("--summary", default=None,
+                    help="append the report to this file "
+                         "(e.g. $GITHUB_STEP_SUMMARY)")
+    rg.set_defaults(func=cmd_regime)
+
+    hc = sub.add_parser("hedge-cost",
+                        help="measure carry hedge execution from live books")
+    hc.add_argument("--coins",
+                    default="BTC,ETH,SOL,XRP,HYPE,DOGE,LINK,ZEC,FARTCOIN,kPEPE")
+    hc.add_argument("--sizes", default="10000,50000,250000",
+                    help="notional per name, per leg")
+    hc.add_argument("--snapshots", type=int, default=5)
+    hc.add_argument("--interval", type=float, default=60.0,
+                    help="seconds between book snapshots")
+    hc.add_argument("--days", type=int, default=365)
+    hc.add_argument("--spot-fee", type=float, default=0.0010)
+    hc.add_argument("--hurdle", type=float, default=0.0408,
+                    help="APR to beat; default is the 3m T-bill, 18 Sep 2026")
+    hc.add_argument("--top", type=int, default=5)
+    hc.set_defaults(func=cmd_hedge_cost)
 
     fd = sub.add_parser("funding",
                         help="does perp carry survive its execution cost?")

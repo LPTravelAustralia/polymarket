@@ -42,8 +42,9 @@ results are worth more than the code:
 | [STRATEGY.md](STRATEGY.md) | The nine gates every candidate is tested against |
 | [TEARDOWN.md](TEARDOWN.md) | The top Polymarket accounts, tagged MEASURED / REPORTED / INFERRED |
 | [VENUE.md](VENUE.md) | Polymarket vs Hyperliquid: where fees stop being the binding constraint |
-| [FUNDING.md](FUNDING.md) | Perp carry — the one candidate that works, and pays the T-bill rate |
+| [FUNDING.md](FUNDING.md) | Perp carry — the one candidate that works, measured against live order books, and capped at roughly $1–2k a year above cash |
 | [MEMECOINS.md](MEMECOINS.md) | pump.fun, Axiom, copy trading, and why repetition amplifies a negative edge |
+| [REGIME.md](REGIME.md) | Buying the house's side (HLP) and the carry (sUSDe) instead of building it, why timing is most of the story, and the monitor that watches for it |
 
 **The short version.** Eleven of twelve candidates failed, and they failed
 for one reason rather than twelve: fees and adverse selection exceed the
@@ -51,7 +52,15 @@ available edge everywhere a retail participant can reach. Polymarket's 0.92%
 round trip consumed a 1.01% structural edge. Hyperliquid solved the fee
 problem — 0.0013% measured — and ran straight into 3.8bp of adverse
 selection against a 2bp spread. The twelfth, funding harvest, clears its
-costs and earns roughly what cash earns.
+costs — but only at small size. Measured against live order books it beats
+cash by about $800 a year on $60k of capital, and the excess disappears as
+size grows.
+
+What those measurements missed is covered in REGIME.md: the winning side
+can often be bought rather than built, and all twelve were measured in the
+quietest year since 2023. The same carry paid 17.5% in 2024 and pays cash
+today. `polybot regime` — run every six hours by a GitHub Action — reports
+which of those markets you are in.
 
 The winners at every venue were structurally advantaged rather than skilled:
 a 20-second broadcast lag, a mint address known before it existed, a 1% fee

@@ -314,3 +314,94 @@ class TestHysteresis:
         gh = FakeGitHub({"number": 3, "title": "[regime] RICH"})
         assert apply(reading(0.0, 0.30, errors=(1,)), gh) is Action.REFRESH
         assert "Regime: **RICH**" in gh.calls[0][2]["body"]
+
+
+class TestLockedRate:
+    """The Deribit locked rate: a regime driver on its 30-day mean only."""
+
+    @staticmethod
+    def _futures(premium_ann, start, days=60):
+        import datetime as dt
+        from polybot.venues.deribit import last_friday, quarterly_name
+        exp = last_friday(start.year + (start.month > 9), ((start.month + 2) // 3 * 3) % 12 + 3)
+        exp_ms = int(dt.datetime(exp.year, exp.month, exp.day, 8,
+                                 tzinfo=dt.timezone.utc).timestamp() * 1000)
+        ticks, close, spot = [], [], {}
+        for i in range(days):
+            d = start + dt.timedelta(days=i)
+            t = int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
+            left = (exp_ms - (t + 86_400_000)) / 86_400_000
+            ticks.append(t)
+            close.append(100.0 * (1 + premium_ann * left / 365))
+            spot[d.isoformat()] = 100.0
+        return {quarterly_name("BTC", exp): {"expiry_ms": exp_ms, "ticks": ticks,
+                                             "close": close}}, spot
+
+    def test_thirty_day_mean_recovers_the_rate(self):
+        import datetime as dt
+        from polybot.monitor.regime import basis_30d_mean
+        fut, spot = self._futures(0.09, dt.date(2025, 1, 2))
+        mean, n = basis_30d_mean(fut, spot)
+        assert mean == pytest.approx(0.09, rel=1e-6)
+        assert n == 30
+
+    def test_too_little_history_is_unavailable(self):
+        import datetime as dt
+        from polybot.monitor.regime import basis_30d_mean
+        fut, spot = self._futures(0.09, dt.date(2025, 1, 2), days=5)
+        assert basis_30d_mean(fut, spot) is None
+
+    def test_locked_rate_thresholds_match_the_calibration(self):
+        from polybot.monitor.regime import DEFAULT_THRESHOLDS
+        t = DEFAULT_THRESHOLDS["BTC/ETH 3m locked rate"]
+        # sUSDe-regime means from 2024-26: QUIET 4.5%, WARMING 7.4%, RICH 13.2%.
+        assert t.classify(0.045) is Level.QUIET
+        assert t.classify(0.132) is Level.RICH
+
+    def test_env_override_key(self, monkeypatch):
+        monkeypatch.setenv("REGIME_BASIS_RICH", "15")
+        assert thresholds_from_env()["BTC/ETH 3m locked rate"].rich == pytest.approx(0.15)
+
+
+class TestGap:
+    def test_gap_is_context_only(self):
+        from polybot.monitor.regime import gap_signal
+        f = Signal("f", T, value=0.40)
+        b = Signal("b", T, value=0.05)
+        g = gap_signal(f, b)
+        assert g.value == pytest.approx(0.35)
+        assert not g.drives_regime
+        r = Reading(signals=[Signal("carry", T, value=0.0), g])
+        assert r.level is Level.QUIET
+
+    def test_gap_needs_both_legs(self):
+        from polybot.monitor.regime import gap_signal
+        g = gap_signal(Signal("f", T, value=0.1), Signal("b", T, error="down"))
+        assert not g.available
+
+
+class TestRiskGauges:
+    def test_trend_gap(self):
+        from polybot.monitor.regime import trend_gap
+        closes = [100.0] * 199 + [120.0]
+        assert trend_gap(closes) == pytest.approx(120.0 / 100.1 - 1)
+        assert trend_gap([1.0] * 50) is None
+
+    def test_percentile_rank(self):
+        from polybot.monitor.regime import percentile_rank
+        assert percentile_rank([1, 2, 3, 4], 2) == pytest.approx(0.5)
+
+    def test_gauges_never_move_the_alert_and_are_not_compared_with_cash(self):
+        from polybot.monitor.regime import _NEVER
+        g = Signal("Trend", _NEVER, value=0.25, is_net=False,
+                   drives_regime=False, is_yield=False)
+        r = Reading(signals=[Signal("carry", T, value=0.0), g])
+        assert r.level is Level.QUIET
+        md = render_markdown(r)
+        assert "| **+25.00%** | — | context only | — |" in md
+
+    def test_unavailable_gauge_does_not_print_infinite_thresholds(self):
+        from polybot.monitor.regime import _NEVER
+        g = Signal("Trend", _NEVER, error="down", drives_regime=False, is_yield=False)
+        md = render_markdown(Reading(signals=[Signal("carry", T, value=0.0), g]))
+        assert "inf" not in md
